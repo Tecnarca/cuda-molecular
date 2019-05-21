@@ -1,0 +1,12 @@
+/check_kerns.h
+  void rotate(...) @ line 95
+1. Extracts rotation submatrix 3x3 in const float type 
+2. For each atom (rotate the whole molecule)
+3. get 3d coordinates
+4. Apply the transformation
+
+  voi rotate (*...) @ line 124
+1. Extracts rotation submatrix 4x4 in const float type
+2. For each atom of a fragment (rotate only on one liberty degree)
+3. get 3d coordinates
+4. Apply the transformation

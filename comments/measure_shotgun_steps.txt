@@ -1,0 +1,7 @@
+/check_kerns.h
+  int measure_shotgun(...) @ line 162
+1. Declare a score variable
+2. for each atom
+3. Get his position (zoom by grid_factor_d)
+4. "force" them to stay within a 100x100x100 cube
+5. compute the score based on pocket array (a cube) values

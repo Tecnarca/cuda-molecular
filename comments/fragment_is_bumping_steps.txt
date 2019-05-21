@@ -1,0 +1,8 @@
+/check_kerns.h
+  bool fragment_is_bumping(...) @ line 258
+1. Initialize variables
+2. for each atom
+3. evaluate fragment is true if the 2 atoms passed as argument (with mask) belong to different fragments
+4. compute distance between atom points
+5. set is_bumping to true if distance tends to zero
+6. return True if(is_bumping)
