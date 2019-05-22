@@ -9,6 +9,8 @@
 #define VOLUMESIZE 1000000
 #endif
 
+// __constant__ float rotation_matrix[12]
+
 
 extern "C" void ps_kern(float* atoms_in, float* atoms_out, int precision,float* score_pos, int* start, int* stop, int* mask )
 {
