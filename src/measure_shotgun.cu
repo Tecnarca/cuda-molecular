@@ -1,4 +1,4 @@
-// I think pocket should be texturizable
+// I think pocket should be texturizable, as here it is only read contiguously by contiguous threads.
 
 __device__ int measure_shotgun (float* atoms, float* pocket)
 {
