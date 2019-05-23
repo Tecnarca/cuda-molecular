@@ -160,12 +160,12 @@ __global__ void fragment_check(float* in, float* score_pos, int& best_angle, int
   unsigned int cacheIndex = angle;
   best_angles[cacheIndex] = angle;
 
-  const int score = measure_shotgun<<<threadsPerBlock,Blocks>>>(in, score_pos);
+  const int score = measure_shotgun<<<THREADSPERBLOCK,BLOCKS>>>(in, score_pos);
   std::cout<<" score is: "<<score<<" for fragm: "<<i<<"with angle: "<<j<<std::endl;
 
   cache_score[cacheIndex] = score;
 
-  const bool is_bumping = fragment_is_bumping<<<threadsPerBlock,Blocks>>>(in, &mask[i*n_atoms]);
+  const bool is_bumping = fragment_is_bumping<<<THREADSPERBLOCK,BLOCKS>>>(in, &mask[i*n_atoms]);
 
   cache_is_bumping[cacheIndex] = is_bumping;
 
@@ -191,7 +191,7 @@ __global__ void fragment_check(float* in, float* score_pos, int& best_angle, int
   }
 
   // iterate to next angle (for this fragment)
-  rotate<<<threadsPerBlock,Blocks>>>(in, &mask[i*n_atoms], rotation_matrix);
+  rotate<<<THREADSPERBLOCK,BLOCKS>>>(in, &mask[i*n_atoms], rotation_matrix);
 }
 
 
