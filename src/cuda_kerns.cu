@@ -61,7 +61,7 @@ extern "C" void ps_kern( float* in, float* out, int precision, float* score_pos,
 
 
 	status = cudaMalloc((void**) &d_stop, sizeof(float)*NATOM);
-  if(DEBUG && status!=cudaSuccess)
+        if(DEBUG && status!=cudaSuccess)
 		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
 	status_cp = cudaMemcpy(d_stop, stop, sizeof(float)*NATOM, cudaMemcpyHostToDevice);
@@ -70,7 +70,7 @@ extern "C" void ps_kern( float* in, float* out, int precision, float* score_pos,
 
 
 	status = cudaMalloc((void**) &d_mask, sizeof(float)*MASKSIZE);
-  if(DEBUG && status!=cudaSuccess)
+        if(DEBUG && status!=cudaSuccess)
 		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
 	status_cp = cudaMemcpy(d_mask, mask, sizeof(float)*MASKSIZE, cudaMemcpyHostToDevice);
@@ -124,7 +124,7 @@ extern "C" void ps_kern( float* in, float* out, int precision, float* score_pos,
 	cudaFree(d_start);
 	cudaFree(d_stop);
 
-  // not texturizable
+        // not texturizable
 	cudaFree(d_in);
 	cudaFree(d_out);
 
