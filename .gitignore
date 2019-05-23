@@ -1,2 +1,4 @@
 *.DS_Store
 src/cuda_kerns.cpp
+src/measure_shotgun.cpp
+src/rotate.cpp

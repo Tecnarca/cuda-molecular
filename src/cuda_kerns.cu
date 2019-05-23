@@ -9,8 +9,13 @@
 #define VOLUMESIZE 1000000
 #endif
 
+<<<<<<< HEAD
 #define THREADSPERBLOCK 512
 #define BLOCKS 3
+=======
+// __constant__ float rotation_matrix[12]
+
+>>>>>>> 9171ba49fae4808d3f9c256c218325df3b6de2d9
 
 // function declarations (see bodies below). We may create an header file for these ones, but then we have to modify CMakeLists.txt I guess
 __global__ void fragment_check(float*, float*, int&, int&, int*, int*, int*);
