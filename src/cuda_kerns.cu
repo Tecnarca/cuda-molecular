@@ -191,7 +191,7 @@ __global__ void fragment_check(float* in, float* score_pos, int& best_angle, int
   }
 
   // iterate to next angle (for this fragment)
-  rotate<<<threadsPerBlock,Blocks>(in, &mask[i*n_atoms], rotation_matrix);
+  rotate<<<threadsPerBlock,Blocks>>>(in, &mask[i*n_atoms], rotation_matrix);
 }
 
 
