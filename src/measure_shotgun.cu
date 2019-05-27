@@ -1,8 +1,8 @@
 // I think pocket should be texturizable, as here it is only read contiguously by contiguous threads.
 
-__device__ int measure_shotgun (float* atoms, float* pocket)
+__global__ void measure_shotgun (float* atoms, float* pocket, float* scores, int index)
 {
-    unsigned int threadsPerBlock = blockDim.x;
+    unsigned int threadsPerBlock = THREADSPERBLOCK;
 
     // one entry per atom processed within block (don't know if it's actually faster)
     __shared__ float cache[threadsPerBlock];
@@ -51,7 +51,7 @@ __device__ int measure_shotgun (float* atoms, float* pocket)
     __syncthreads(); // probably unnecessary, or probably should be __threadfence_block()
 
     // total score
-    return blockScore[0] + blockScore[1] + blockScore[2];
+    scores[index] = blockScore[0] + blockScore[1] + blockScore[2];
 
 
 }
