@@ -18,10 +18,11 @@ __global__ void eval_angles(float* in, float* score_pos, int& best_angle, int& b
   unsigned int cacheIndex = angle;
   best_angles[cacheIndex] = angle;
 
-  measure_shotgun<<<threadsPerBlock,Blocks>>>(in, score_pos, &cache_score);  // populates the scores cache
+  measure_shotgun<<<threadsPerBlock,Blocks>>>(in, score_pos, &cache_score, cacheIndex);  // populates the scores cache
   std::cout<<" score is: "<<score<<" for fragm: "<<i<<"with angle: "<<j<<std::endl;  // probably problematic :)
 
-  fragment_is_bumping<<<threadsPerBlock,Blocks>>>(in, &mask[i*n_atoms], &cache_is_bumping); // populates the is_bumping cache
+	// the cache index has to be added as an input arg for fragment_is_bumping
+  fragment_is_bumping<<<threadsPerBlock,Blocks>>>(in, &mask[i*n_atoms], &cache_is_bumping, cacheIndex); // populates the is_bumping cache
 
 	// doubt: I don't know if I can pass shared caches to other nested kernels in total tranquility (I think so).
 	// If not, we need a "buffer" array for the function that will be flushed into the cache (not so bad)
