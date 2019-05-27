@@ -1,46 +1,56 @@
-#ifndef ARRSIZE
-#define ARRSIZE 256*512*512
-#endif
-
 #ifndef DEBUG
-#define DEBUG 1
-#define NATOM 4
-#define MASKSIZE 256
-#define VOLUMESIZE 1000000
-#define THREADSPERBLOCK 512
-#define BLOCKS 3
+#define INSIZE 256 //real (used by the main.cpp) dimension of 'in'
+#define N_ATOMS 64 //atoms inside 'in'
+#define N_FRAGS 4 //number of fragments
+#define DEBUG 1 //should we execute the debug prints and checks?
+#define MASKSIZE 256 //dimension of the 'mask'
+#define VOLUMESIZE 1000000 //dimension of 'score_pos'
+#define THREADSPERBLOCK 512 //how many threads per block? (max 1024) <- probabilmente c'è da vedere quanto conviene lasciarlo così
+#define BLOCKS 3 //how many blocks per grid? <- probabilmente c'è da vedere quanto conviene lasciarlo così
+#define MAX_ANGLE 256 //up to which angle we need to run the algorithm?
+#define LIMIT_DISTANCE2 = 2.0f; //used in fragment_is_bumping, it is the minimum distance between to atoms
 #endif
 
-// function declarations (see bodies below). We may create an header file for these ones, but then we have to modify CMakeLists.txt I guess
-__global__ void fragment_check(float*, float*, int&, int&, int*, int*, int*);
-__global__ void update(float*, float*);
+//Speed improvements:
+//0) Implement CONSTANT and TEXTURE memory effectively
+//1) (having n_atoms as global) remove the indexing by "+blockDim.x" in the kernels to use "+N_ATOMS", that is a predefined variable (so it's faster to access?)
+//2) If we want to have a greater parallelism, we could put the malloc and the memcpy on different streams (not requested for this project by the professor)
+//3) Check if it's convenient to remove the 'i' parameter from some kernels and use the '&mask[i*N_ATOMS]' instead
+//4) [put other ideas to test later here]
 
-extern "C" void ps_kern( float* in, float* out, int precision, float* score_pos, int* start, int* stop, int* mask )
+
+//CUDA KERNELS DECLARATION
+__global__ void rotateN(float* d_in, int* d_mask, int precision, int i);
+__global__ void measure_shotgun(float* d_in, float* d_score_pos, int* d_shotgun);
+__global__ void fragment_is_bumping(float* d_in, int* d_mask, bool* d_bumping, int i);
+__global__ void compute_best(float* d_in, int* d_shotgun, bool* d_bumping);
+
+
+void ps_kern(float* in, float* out, int precision, float* score_pos, int* start, int* stop, int* mask )
 {
-	float *d_in, *d_out, *d_score_pos;
+	float *d_in, *d_score_pos, *d_rotation_matrix;
 
-	int* d_start, int* d_stop, int* d_mask;
+	int *d_start, *d_stop, *d_mask, *d_shotgun;
 
-	cudaError_t status;
-	cudaError_t status_cp;
+	bool *d_bumping;
 
-	status = cudaMalloc((void**) &d_in, sizeof(float)*ARRSIZE);
+	cudaError_t status, status_cp;
+
+	//Dimensions of block and grid for the 'fragment_is_bumping' functions
+	dim3 bumping_block(INSIZE,1,1); //256,1,1
+	dim3 bumping_grid(INSIZE,MAX_ANGLE*1/precision,1); //256,256,1
+
+	//GPU MEMORY INITIALIZATION
+
+	/*'in' on the GPU is long INSIZE*256*ceil(precision) so that we can save all the ROTATED 'in' arrays at the same time.
+	The first INSIZE cells are the original 'in' array (and we initialize only those with memcpy)*/
+	status = cudaMalloc((void**) &d_in, sizeof(float)*INSIZE*MAX_ANGLE*ceil(1/precision));
 	if(DEBUG && status!=cudaSuccess)
 		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-	status_cp = cudaMemcpy(d_in, in, sizeof(float)*ARRSIZE, cudaMemcpyHostToDevice);
+	status_cp = cudaMemcpy(d_in, in, sizeof(float)*INSIZE, cudaMemcpyHostToDevice);
 	if(DEBUG && status_cp!=cudaSuccess)
 		cout << cudaGetErrorString(status_cp) << " in " << __FILE__ << " at line " << __LINE__ << endl;
-
-
-	status = cudaMalloc((void**) &d_out, sizeof(float)*ARRSIZE);
-	if(DEBUG && status!=cudaSuccess)
-		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
-
-	status_cp = cudaMemcpy(d_out, out, sizeof(float)*ARRSIZE, cudaMemcpyHostToDevice);
-	if(DEBUG && status_cp!=cudaSuccess)
-		cout << cudaGetErrorString(status_cp) << " in " << __FILE__ << " at line " << __LINE__ << endl;
-
 
 	status = cudaMalloc((void**) &d_score_pos, sizeof(float)*VOLUMESIZE);
 	if(DEBUG && status!=cudaSuccess)
@@ -51,148 +61,126 @@ extern "C" void ps_kern( float* in, float* out, int precision, float* score_pos,
 		cout << cudaGetErrorString(status_cp) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
 
-	status = cudaMalloc((void**) &d_start, sizeof(float)*NATOM);
+	status = cudaMalloc((void**) &d_start, sizeof(int)*N_ATOMS);
 	if(DEBUG && status!=cudaSuccess)
 		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-	status_cp = cudaMemcpy(d_start, start, sizeof(float)*NATOM, cudaMemcpyHostToDevice);
+	status_cp = cudaMemcpy(d_start, start, sizeof(int)*N_ATOMS, cudaMemcpyHostToDevice);
 	if(DEBUG && status_cp!=cudaSuccess)
 		cout << cudaGetErrorString(status_cp) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
 
-	status = cudaMalloc((void**) &d_stop, sizeof(float)*NATOM);
-        if(DEBUG && status!=cudaSuccess)
+	status = cudaMalloc((void**) &d_stop, sizeof(int)*N_ATOMS);
+    if(DEBUG && status!=cudaSuccess)
 		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-	status_cp = cudaMemcpy(d_stop, stop, sizeof(float)*NATOM, cudaMemcpyHostToDevice);
+	status_cp = cudaMemcpy(d_stop, stop, sizeof(int)*N_ATOMS, cudaMemcpyHostToDevice);
 	if(DEBUG && status_cp!=cudaSuccess)
 		cout << cudaGetErrorString(status_cp) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-
-	status = cudaMalloc((void**) &d_mask, sizeof(float)*MASKSIZE);
-        if(DEBUG && status!=cudaSuccess)
+	status = cudaMalloc((void**) &d_mask, sizeof(int)*MASKSIZE);
+    if(DEBUG && status!=cudaSuccess)
 		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-	status_cp = cudaMemcpy(d_mask, mask, sizeof(float)*MASKSIZE, cudaMemcpyHostToDevice);
+	status_cp = cudaMemcpy(d_mask, mask, sizeof(int)*MASKSIZE, cudaMemcpyHostToDevice);
 	if(DEBUG && status_cp!=cudaSuccess)
 		cout << cudaGetErrorString(status_cp) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-	// optimize each rotamer
-	for ( int i = 0; i < n_frags; ++i )
-	{
-		// compute the epsilon value for floating point precision
-		const auto epsilon = std::numeric_limits<float>::epsilon();
+	//'bumping' is an array that for each 'in' array tells us if the fragment is bumping
+	status = cudaMalloc((void**)d_bumping, sizeof(bool)*MAX_ANGLE*ceil(1/precision));
+	if(DEBUG && status!=cudaSuccess)
+		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-		// get the index of starting atom
-		const auto start_atom_index = start[i];
-		const auto stop_atom_index = stop[i];
+	//these lines initializes the d_bumping array to false
+	status_cp = cudaMemset((void**)d_bumping, 0, sizeof(bool)*MAX_ANGLE*ceil(1/precision));
+	if(DEBUG && status!=cudaSuccess)
+		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-		// get the rotation matrix for this fragment
-		const auto rotation_matrix = free_rotation::compute_matrix(precision,in[start_atom_index],in[start_atom_index+n_atoms],in[start_atom_index+2*n_atoms],in[stop_atom_index],in[stop_atom_index+n_atoms],  in[stop_atom_index+2*n_atoms]);
-		// declare the variables for driving the optimization
-		int best_angle = 0;
-		int best_score = measure_shotgun<<<THREADSPERBLOCK, BLOCKS>>>(d_in, d_score_pos);
-		std::cout<<"init: best score is: "<<best_score<<std::endl;
-		bool is_best_bumping = fragment_is_bumping<<<THREADSPERBLOCK, BLOCKS>>>(d_in, &d_mask[i*n_atoms]); // check the manipulations made on d_mask!
-		// optimize shape
 
-		fragment_check<<<256*(1/precision), 1>>>(best_angle, best_score); // Until the precision is not >1024 only 1 block needed
+	//'shotgun' is an array that for each 'in' array tells us what the score of that array is
+	status = cudaMalloc((void**)d_shotgun, sizeof(int)*MAX_ANGLE*ceil(1/precision));
+	if(DEBUG && status!=cudaSuccess)
+		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-		std::cout<<"best angle is: "<<best_angle<<std::endl;
+	status = cudaMalloc((void**) &d_rotation_matrix, sizeof(float)*MASKSIZE);
+    if(DEBUG && status!=cudaSuccess)
+		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-		const int score = measure_shotgun<<<threadsPerBlock,Blocks>>>(d_in, d_score_pos);
-		std::cout<<" score is: "<<score<<" for fragm: "<<i<<"with angle out"<<std::endl;
+	//CUDA stream creation
+	//https://developer.download.nvidia.com/CUDA/training/StreamsAndConcurrencyWebinar.pdf
+	//The webminar above explains how to use effectively the cuda streams
+	cudaStream_t stream1, stream2;
+	cudaStreamCreate(&stream1);
+	cudaStreamCreate(&stream2);
 
-		const auto rotation_matrix_best = free_rotation::compute_matrix(best_angle,in[start_atom_index],in[start_atom_index+n_atoms],in[start_atom_index+2*n_atoms],in[stop_atom_index],in[stop_atom_index+n_atoms],  in[stop_atom_index+2*n_atoms]);
-		rotate<<<THREADSPERBLOCK, BLOCKS>>>(d_in, &d_mask[i*n_atoms], rotation_matrix_best);
+	// start CUDA timing here
+
+	for (int i=0;i<n_frags;++i){ //Rotameter optimization. Numbers after the cells is the stream channel.
+
+		//EACH FUNCTION in this 'for' must be called as a KERNEL (decide sizes)
+		//also: stream 0 means that this kernel starts execution only when there are no other streams running (classic kernel calls are put in stream 0)
+
+		//PUT GLOBAL SYNC HERE: Qual'è la funzione che sincronizza tutti gli stream?	
+
+		/*this function takes in input the first 'in' array and computes every matrix (for each angle) 
+		and writes in the other 'in' arrays all the rotated arrays.
+		From the sequestial program perspective, this function:
+		>computes start_atom_index and stop_atom_index for the 3 axis
+		>executes compute_matrix()
+		>executes rotate()
+		The 'precision' parameter is needed when it is not 1 (it is for us, we keep it in order to keep this code general (?)):
+		Is needed in order to create an associativity between 'in' vectors and the rotations (we will see this better inside the rotateN function when we'll write it [nota per marco: significa che non sono sicuro che questa cosa sia giusta, ma ad occhio si])
+		The 'i' parameter is needed, since the compute_matrix() function needs to know which fragment must be used to compute the rotation mask 
+		(^ can this be done by passing &d_mask[i*n_atoms]? If so, 'i' is useless)*/
+		rotateN<<<?,?,0,stream1>>>(d_in, d_mask, precision, i); //must be put on stream 1
+
+		//this initialization is needed by fragment_is_bumping and is completely in parallel w.r.t rotateN() (rotateN does not need d_bumping, so we reset it here)
+		status_cp = cudaMemsetAsync((void**)d_bumping, 0, sizeof(bool)*MAX_ANGLE*ceil(1/precision), stream2);
+		if(DEBUG && status!=cudaSuccess)
+		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+
+
+		//PUT GLOBAL SYNC HERE: Qual'è la funzione che sincronizza tutti gli stream?	
+
+		/*For each 'in' vector (every thread must read a different 'in' vector), we must compute the shotgun and place it in the shotgun vector, everyone at the corresponding index of the 'in' array
+		e.g. the first thread (or the first block, depending on the setting) reads the first 'in' array (positions 0-255) and places the result in shotgun[0],
+		the second thread (or the first block, depending on the setting) reads the second 'in' array (positions 256-511) and places the result in shotgun[1] etc.
+		per marco: se hai problemi a realizzare questa cosa, è possibile che devi usare una griglia,
+		oppure mettere i blocchi in 2d (probabilmente dovrò fare la stessa cosa su fragment_is_bumping() */
+		measure_shotgun<<<?,?, 0, stream1>>>(d_in, d_score_pos, d_shotgun); //must be put on stream 1
+
+		/*As for measure_shotgun, for each 'in' vector, we must compute if the fragment is bumping and place the result in the 'bumping' vector.
+		This operation can be performed completely in parallel w.r.t the measure_shotgun kernels (same reads, no input modification, the outputs are on different variables)
+		The 'i' parameter is needed, since the compute_matrix() function needs to know which fragment must be used to compute the rotation mask 
+		(^ can this be done by passing &d_mask[i*n_atoms]? If so, 'i' is useless) */
+		fragment_is_bumping<<<bumping_grid,bumping_block, 0, stream2>>>(d_in, d_mask, d_bumping, i); //must be put on stream 2
+
+		//PUT GLOBAL SYNC HERE: Qual'è la funzione che sincronizza tutti gli stream?
+
+		/*Starting from all the 'in' array and given their scores and if they are bumping:
+		this function extracts which 'in' array is the best one and copies it back as the first array, 
+		to start the next computation from that one.
+		*/
+		compute_best<<<?,?>>>(d_in, d_shotgun, d_bumping); //must be put on stream 0
+
 	}
 
-	update<<<THREADSPERBLOCK, BLOCKS>>>(d_in, d_out);
-
+	//stop CUDA timing here
+		
 	cudaError_t status_wb;
-	status_wb = cudaMemcpy(in, d_in, sizeof(float)*ARRSIZE, cudaMemcpyDeviceToHost);
+	//we (should) copy the best 'in' array back in central memory as the 'out' array 
+	//(this memcpy copies from the gpu the FIRST 'in' array (index 0-255) that isn't necessarily the best, unless "compute_best" ensures this)
+	status_wb = cudaMemcpy(out, d_in, sizeof(float)*ARRSIZE, cudaMemcpyDeviceToHost);
 	if(DEBUG && status_wb!=cudaSuccess)
 		cout << cudaGetErrorString(status_wb) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-	status_wb = cudaMemcpy(out, d_out, sizeof(float)*ARRSIZE, cudaMemcpyDeviceToHost);
-	if(DEBUG && status_wb!=cudaSuccess)
-		cout << cudaGetErrorString(status_wb) << " in " << __FILE__ << " at line " << __LINE__ << endl;
-
-
-	// none of these data structures is changed by any kernel, thus I think we can texturize
+	// none of these data structures is changed by any kernel, thus we can texturize
 	cudaFree(d_score_pos);
 	cudaFree(d_start);
 	cudaFree(d_stop);
-
-        // not texturizable
-	cudaFree(d_in);
-	cudaFree(d_out);
-
-	// for this I don't know, depends on fragment_is_bumping kernel
 	cudaFree(d_mask);
 
-}
+    // not texturizable
+	cudaFree(d_in);
 
-
-
-
-__global__ void fragment_check(float* in, float* score_pos, int& best_angle, int& best_score, int* start, int* stop, int* mask) {
-  // precision is not passed because it determines the n. of threads
-
-  int threadsPerBlock = blockDim.x;
-  int Blocks = gridDim.x;  // don't know if it is correct
-
-  // each thread will evaluate an angle and put the score on the cache (cache_score)
-  int angle = threadId.x;
-
-  // I want to get the angle that scores most without bumping, so I need 2 caches
-  __shared__ float cache_score[threadsPerBlock];
-  __shared__ bool cache_is_bumping[threadsPerBlock];
-
-  // I found that this cache is necessary in the reduction phase, otherwise deadlocks are possible
-  __shared__ int best_angles[threadsPerBlock];
-  unsigned int cacheIndex = angle;
-  best_angles[cacheIndex] = angle;
-
-  const int score = measure_shotgun<<<THREADSPERBLOCK,BLOCKS>>>(in, score_pos);
-  std::cout<<" score is: "<<score<<" for fragm: "<<i<<"with angle: "<<j<<std::endl;
-
-  cache_score[cacheIndex] = score;
-
-  const bool is_bumping = fragment_is_bumping<<<THREADSPERBLOCK,BLOCKS>>>(in, &mask[i*n_atoms]);
-
-  cache_is_bumping[cacheIndex] = is_bumping;
-
-  __syncthreads();
-
-  int i = blockDim.x/2;
-
-  // get the highest non-bumping score
-  while (i != 0) {
-    if (cacheIndex < i) {
-      if (cache_score[cacheIndex] < cache_score[cacheIndex + i] && !cache_is_bumping[cacheIndex + i]) {
-        cache[cacheIndex] = cache[cacheIndex + i];
-        best_angle[cacheIndex] = cacheIndex + i;
-      }
-      __syncthreads();
-    }
-    i /= 2;
-  }
-
-  if(cacheIndex == 0) {
-    best_score = cache[cacheIndex];
-    best_angle = best_angle[cacheIndex];
-  }
-
-  // iterate to next angle (for this fragment)
-  rotate<<<THREADSPERBLOCK,BLOCKS>>>(in, &mask[i*n_atoms], rotation_matrix);
-}
-
-
-
-
-__global__ void update(float* in, float* out) {
-
-  int x = threadId.x;
-  out[x] = in [x];
 }

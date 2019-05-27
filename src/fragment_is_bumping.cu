@@ -2,7 +2,7 @@
 #define LIMIT_DISTANCE2 = 2.0f;
 #endif
 
-//i pass is_bumping for thread from each block to access it
+//I pass is_bumping for thread from each block to access it
 __device__ void fragment_is_bumping(const float* in, const int* mask, bool &is_bumping){
 
 	//spawn n_atoms threads per block and n_atoms blocks
