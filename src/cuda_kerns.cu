@@ -150,3 +150,4 @@ void ps_kern(float* in, float* out, int precision, float* score_pos, int* start,
 	cudaFree(d_mask);
 	cudaFree(d_rotation_matrix);
 	cudaFree(d_in);
+}
