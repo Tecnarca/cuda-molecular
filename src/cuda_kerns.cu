@@ -1,3 +1,4 @@
+
 #ifndef DEBUG
 #define INSIZE 256 //real (used by the main.cpp) dimension of 'in'
 #define N_ATOMS 64 //atoms inside 'in'
@@ -20,30 +21,27 @@
 
 
 //CUDA KERNELS DECLARATION
-__global__ void rotateN(float* d_in, int* d_mask, int precision, int i);
 __global__ void measure_shotgun(float* d_in, float* d_score_pos, int* d_shotgun);
 __global__ void fragment_is_bumping(float* d_in, int* d_mask, bool* d_bumping, int i);
-__global__ void compute_best(float* d_in, int* d_shotgun, bool* d_bumping);
+__global__ void eval_angles(float* in, float* score_pos, int& best_angle, int& best_score, free_rotation::value_type& best_rotation_matrix, int start_index, int stop_index, int* mask);
+__global__ void update(float* in, float* out);
 
 
 void ps_kern(float* in, float* out, int precision, float* score_pos, int* start, int* stop, int* mask )
 {
 	float *d_in, *d_score_pos, *d_rotation_matrix;
+	int *d_start, *d_stop, *d_mask;
 
-	int *d_start, *d_stop, *d_mask, *d_shotgun;
-
-	bool *d_bumping;
-
-	cudaError_t status, status_cp;
-
+	cudaError_t status, status_cp, status_tx;
+	
 	//Dimensions of block and grid for the 'fragment_is_bumping' functions
 	dim3 bumping_block(INSIZE,1,1); //256,1,1
 	dim3 bumping_grid(INSIZE,MAX_ANGLE*1/precision,1); //256,256,1
 
 	//GPU MEMORY INITIALIZATION
-
-	/*'in' on the GPU is long INSIZE*256*ceil(precision) so that we can save all the ROTATED 'in' arrays at the same time.
-	The first INSIZE cells are the original 'in' array (and we initialize only those with memcpy)*/
+	textue<float> texScore_pos;
+	texture<int> texMask;
+	
 	status = cudaMalloc((void**) &d_in, sizeof(float)*INSIZE*MAX_ANGLE*ceil(1/precision));
 	if(DEBUG && status!=cudaSuccess)
 		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
@@ -51,6 +49,7 @@ void ps_kern(float* in, float* out, int precision, float* score_pos, int* start,
 	status_cp = cudaMemcpy(d_in, in, sizeof(float)*INSIZE, cudaMemcpyHostToDevice);
 	if(DEBUG && status_cp!=cudaSuccess)
 		cout << cudaGetErrorString(status_cp) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+		
 
 	status = cudaMalloc((void**) &d_score_pos, sizeof(float)*VOLUMESIZE);
 	if(DEBUG && status!=cudaSuccess)
@@ -71,40 +70,40 @@ void ps_kern(float* in, float* out, int precision, float* score_pos, int* start,
 
 
 	status = cudaMalloc((void**) &d_stop, sizeof(int)*N_ATOMS);
-    if(DEBUG && status!=cudaSuccess)
+  if(DEBUG && status!=cudaSuccess)
 		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
 	status_cp = cudaMemcpy(d_stop, stop, sizeof(int)*N_ATOMS, cudaMemcpyHostToDevice);
 	if(DEBUG && status_cp!=cudaSuccess)
 		cout << cudaGetErrorString(status_cp) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+		
 
 	status = cudaMalloc((void**) &d_mask, sizeof(int)*MASKSIZE);
-    if(DEBUG && status!=cudaSuccess)
+  if(DEBUG && status!=cudaSuccess)
 		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
 	status_cp = cudaMemcpy(d_mask, mask, sizeof(int)*MASKSIZE, cudaMemcpyHostToDevice);
 	if(DEBUG && status_cp!=cudaSuccess)
 		cout << cudaGetErrorString(status_cp) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-	//'bumping' is an array that for each 'in' array tells us if the fragment is bumping
-	status = cudaMalloc((void**)d_bumping, sizeof(bool)*MAX_ANGLE*ceil(1/precision));
-	if(DEBUG && status!=cudaSuccess)
+
+	status = cudaMalloc((void**) &d_rotation_matrix, sizeof(float)*12);
+  if(DEBUG && status!=cudaSuccess)
 		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-	//these lines initializes the d_bumping array to false
-	status_cp = cudaMemset((void**)d_bumping, 0, sizeof(bool)*MAX_ANGLE*ceil(1/precision));
-	if(DEBUG && status!=cudaSuccess)
-		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+	status_cp = cudaMemcpy(d_rotation_matrix, rotation_matrix, sizeof(int)*12, cudaMemcpyHostToDevice);
+	if(DEBUG && status_cp!=cudaSuccess)
+		cout << cudaGetErrorString(status_cp) << " in " << __FILE__ << " at line " << __LINE__ << endl;	
 
+  // --------------
+	status_tx = cudaBindtexture(NULL, texScore_pos, d_score_pos, sizeof(float)*VOLUMESIZE);
+	if(DEBUG && status_tx!=cudaSuccess)
+	  cout << cudaGetErrorString(status_tx) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-	//'shotgun' is an array that for each 'in' array tells us what the score of that array is
-	status = cudaMalloc((void**)d_shotgun, sizeof(int)*MAX_ANGLE*ceil(1/precision));
-	if(DEBUG && status!=cudaSuccess)
-		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+	status_tx = cudaBindtexture(NULL, texMask, d_mask, sizeof(float)*VOLUMESIZE);
+	if(DEBUG && status_tx!=cudaSuccess)
+		 cout << cudaGetErrorString(status_tx) << " in " << __FILE__ << " at line " << __LINE__ << endl;				
 
-	status = cudaMalloc((void**) &d_rotation_matrix, sizeof(float)*MASKSIZE);
-    if(DEBUG && status!=cudaSuccess)
-		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
 	//CUDA stream creation
 	//https://developer.download.nvidia.com/CUDA/training/StreamsAndConcurrencyWebinar.pdf
@@ -117,51 +116,20 @@ void ps_kern(float* in, float* out, int precision, float* score_pos, int* start,
 
 	for (int i=0;i<n_frags;++i){ //Rotameter optimization. Numbers after the cells is the stream channel.
 
-		//EACH FUNCTION in this 'for' must be called as a KERNEL (decide sizes)
-		//also: stream 0 means that this kernel starts execution only when there are no other streams running (classic kernel calls are put in stream 0)
+		const auto epsilon = std::numeric_limits<float>::epsilon();
 
-		//PUT GLOBAL SYNC HERE: Qual'è la funzione che sincronizza tutti gli stream?	
+		// get the index of starting atom
+		const auto start_atom_index = start[i];
+		const auto stop_atom_index = stop[i];
 
-		/*this function takes in input the first 'in' array and computes every matrix (for each angle) 
-		and writes in the other 'in' arrays all the rotated arrays.
-		From the sequestial program perspective, this function:
-		>computes start_atom_index and stop_atom_index for the 3 axis
-		>executes compute_matrix()
-		>executes rotate()
-		The 'precision' parameter is needed when it is not 1 (it is for us, we keep it in order to keep this code general (?)):
-		Is needed in order to create an associativity between 'in' vectors and the rotations (we will see this better inside the rotateN function when we'll write it [nota per marco: significa che non sono sicuro che questa cosa sia giusta, ma ad occhio si])
-		The 'i' parameter is needed, since the compute_matrix() function needs to know which fragment must be used to compute the rotation mask 
-		(^ can this be done by passing &d_mask[i*n_atoms]? If so, 'i' is useless)*/
-		rotateN<<<?,?,0,stream1>>>(d_in, d_mask, precision, i); //must be put on stream 1
+		int best_angle = 0;
+		float best_score = 0;
+		free_rotation::value_type best_rotation_matrix; // right syntax?
 
-		//this initialization is needed by fragment_is_bumping and is completely in parallel w.r.t rotateN() (rotateN does not need d_bumping, so we reset it here)
-		status_cp = cudaMemsetAsync((void**)d_bumping, 0, sizeof(bool)*MAX_ANGLE*ceil(1/precision), stream2);
-		if(DEBUG && status!=cudaSuccess)
-		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+		eval_angles<<<256*ceil(1/precision),1>>>(in, score_pos, best_angle, best_score, best_rotation_matrix, start_atom_index, stop_atom_index, mask);
 
-
-		//PUT GLOBAL SYNC HERE: Qual'è la funzione che sincronizza tutti gli stream?	
-
-		/*For each 'in' vector (every thread must read a different 'in' vector), we must compute the shotgun and place it in the shotgun vector, everyone at the corresponding index of the 'in' array
-		e.g. the first thread (or the first block, depending on the setting) reads the first 'in' array (positions 0-255) and places the result in shotgun[0],
-		the second thread (or the first block, depending on the setting) reads the second 'in' array (positions 256-511) and places the result in shotgun[1] etc.
-		per marco: se hai problemi a realizzare questa cosa, è possibile che devi usare una griglia,
-		oppure mettere i blocchi in 2d (probabilmente dovrò fare la stessa cosa su fragment_is_bumping() */
-		measure_shotgun<<<?,?, 0, stream1>>>(d_in, d_score_pos, d_shotgun); //must be put on stream 1
-
-		/*As for measure_shotgun, for each 'in' vector, we must compute if the fragment is bumping and place the result in the 'bumping' vector.
-		This operation can be performed completely in parallel w.r.t the measure_shotgun kernels (same reads, no input modification, the outputs are on different variables)
-		The 'i' parameter is needed, since the compute_matrix() function needs to know which fragment must be used to compute the rotation mask 
-		(^ can this be done by passing &d_mask[i*n_atoms]? If so, 'i' is useless) */
-		fragment_is_bumping<<<bumping_grid,bumping_block, 0, stream2>>>(d_in, d_mask, d_bumping, i); //must be put on stream 2
-
-		//PUT GLOBAL SYNC HERE: Qual'è la funzione che sincronizza tutti gli stream?
-
-		/*Starting from all the 'in' array and given their scores and if they are bumping:
-		this function extracts which 'in' array is the best one and copies it back as the first array, 
-		to start the next computation from that one.
-		*/
-		compute_best<<<?,?>>>(d_in, d_shotgun, d_bumping); //must be put on stream 0
+		std::cout<<"best angle is: "<<best_angle<<std::endl;
+		std::cout<<" score is: "<<best_score<<" for fragm: "<<i<<"with angle out"<<std::endl;
 
 	}
 
@@ -174,13 +142,11 @@ void ps_kern(float* in, float* out, int precision, float* score_pos, int* start,
 	if(DEBUG && status_wb!=cudaSuccess)
 		cout << cudaGetErrorString(status_wb) << " in " << __FILE__ << " at line " << __LINE__ << endl;
 
-	// none of these data structures is changed by any kernel, thus we can texturize
+	cudaUnbindTexture(texScore_pos);
+	cudaUnbindTexture(texMask);
 	cudaFree(d_score_pos);
 	cudaFree(d_start);
 	cudaFree(d_stop);
 	cudaFree(d_mask);
-
-    // not texturizable
+	cudaFree(d_rotation_matrix);
 	cudaFree(d_in);
-
-}
