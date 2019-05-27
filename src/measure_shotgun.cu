@@ -1,8 +1,8 @@
-// I think pocket should be texturizable, as here it is only read contiguously by contiguous threads.
 
 __global__ void measure_shotgun (float* atoms, float* pocket, float* scores, int index)
 {
     unsigned int threadsPerBlock = THREADSPERBLOCK;
+    unsigned int blocks = BLOCKS;
 
     // one entry per atom processed within block (don't know if it's actually faster)
     __shared__ float cache[threadsPerBlock];
@@ -13,7 +13,7 @@ __global__ void measure_shotgun (float* atoms, float* pocket, float* scores, int
     int z = threadId.x + 2*blockDim.x;
 
     unsigned int cacheIndex = x;
-    float blockScore[gridDim.x] // one entry per block
+    float blockScore[blocks] // one entry per block
 
     // get the average score
     int score = 0;
@@ -30,7 +30,7 @@ __global__ void measure_shotgun (float* atoms, float* pocket, float* scores, int
     if (index_z > 100) index_z = 100;
 
     // perform reduction (compute partial block score)
-    cache[cacheIndex] = pocket[index_x+100*index_y+10000*index_z];
+    cache[cacheIndex] = tex1Dfetch(pocket, index_x+100*index_y+10000*index_z);
 
     __syncthreads();
 
