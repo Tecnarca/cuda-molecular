@@ -1,4 +1,3 @@
-
 __global__ void measure_shotgun (float* atoms, float* pocket, float* scores, int index)
 {
     unsigned int threadsPerBlock = THREADSPERBLOCK;
@@ -52,6 +51,4 @@ __global__ void measure_shotgun (float* atoms, float* pocket, float* scores, int
 
     // total score
     scores[index] = blockScore[0] + blockScore[1] + blockScore[2];
-
-
 }

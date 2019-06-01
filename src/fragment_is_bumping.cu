@@ -22,7 +22,8 @@ __device__ void fragment_is_bumping(const float* in, const int* mask, bool &is_b
 	        
 	        const float distance2 = diff_x * diff_x +  diff_y * diff_y +  diff_z * diff_z;
 	        
-	        //there could be multiple accesses to is_bumping! Should we avoid it? (WAW to same value, there should be no problem)
+	        //there could be multiple accesses to is_bumping! 
+	        //Should we avoid it? (WAW to same value, there should be no problem)
 			if (distance2 < LIMIT_DISTANCE2) is_bumping = true;
 	}
 }

@@ -16,7 +16,7 @@
 #define MAX(a,b) (a > b ? a : b)
 #endif
 #ifndef ARRSIZE
-#define ARRSIZE 256*512*512 
+#define ARRSIZE 256
 #endif
 int main(int argc, char **argv)
 {

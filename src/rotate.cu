@@ -1,20 +1,3 @@
-// --- THIS PART TO BE INCLUDED IN cuda_kerns.h ---
-// __constant__ float rotation_matrix[12]
-
-// --- END ---
-
-
-
-// --- THIS PART TO BE INCLUDED IN PS_KERN ---
-// cudaError_t status;
-
-// status = cudaMemcpyToSymbol(dev_rotation_matrix, rotation_matrix, 12*sizeof(float))
-
-// if(status != cudaSuccess) {
-//	 cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
-// }
-// --- END ---
-
 __device__ void rotate( float* in, float* atoms, float* rotation_matrix )
 {
 	// each thread will transform the coordinates of one atom

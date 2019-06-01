@@ -1,4 +1,3 @@
-
 #ifndef DEBUG
 #define INSIZE 256 //real (used by the main.cpp) dimension of 'in'
 #define N_ATOMS 64 //atoms inside 'in'
@@ -115,8 +114,6 @@ void ps_kern(float* in, float* out, int precision, float* score_pos, int* start,
 	// start CUDA timing here
 
 	for (int i=0;i<n_frags;++i){ //Rotameter optimization. Numbers after the cells is the stream channel.
-
-		const auto epsilon = std::numeric_limits<float>::epsilon();
 
 		// get the index of starting atom
 		const auto start_atom_index = start[i];
