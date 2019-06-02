@@ -6,68 +6,100 @@
 #define MASKSIZE 256 //dimension of the 'mask'
 #define VOLUMESIZE 1000000 //dimension of 'score_pos'
 #define THREADSPERBLOCK 256 //how many threads per block? (max 1024) <- probabilmente c'è da vedere quanto conviene lasciarlo così
-#define BLOCKS 3 //how many blocks per grid? <- probabilmente c'è da vedere quanto conviene lasciarlo così
+#define BLOCKS 1 //how many blocks per grid? <- probabilmente deve essere UNO
 #define MAX_ANGLE 256 //up to which angle we need to run the algorithm?
-#define LIMIT_DISTANCE2 = 2.0f; //used in fragment_is_bumping, it is the minimum distance between to atoms
+#define LIMIT_DISTANCE2 2.0 //used in fragment_is_bumping, it is the minimum distance between to atoms
+#define GRID_FACTOR_D 0.5
+#define PI 3.141592653589793238462643383279
+#define RADIAN_COEF PI/128.0;
 #endif
 
-#include <iostream>
-__device__ void rotate( float* in, float* atoms, float* rotation_matrix )
+#include <cuda_kerns.h>
+#include <stdio.h>
+
+texture<float> texScore_pos;
+//di mask non stiamo a usà il fatto che è una texture (?)
+texture<int> texMask;
+
+__device__ void compute_matrix( const float rotation_angle,
+                const float x_orig, const float y_orig, const float z_orig,
+                const float x_vector, const float y_vector, const float z_vector, float* matrix)
+        {
+            // compute the rotation axis
+            const float u = (float)x_vector - x_orig;
+            const float v = (float)y_vector - y_orig;
+            const float w = (float)z_vector - z_orig;
+            const float u2 = u * u;
+            const float v2 = v * v;
+            const float w2 = w * w;
+
+            // compute its lenght and square root
+            const float l2 = u * u + v * v + w * w;
+            const float l = sqrtf(l2);
+
+            // precompute sine and cosine for the angle
+            float angle_rad = (float)-rotation_angle*RADIAN_COEF;
+            const float sint = sin(angle_rad);
+            const float cost = cos(angle_rad);
+            const float one_minus_cost = (float)1.0 - cost;
+
+            // return the actual matrix
+            matrix[0] = 	   (u2 + (v2 + w2) * cost) / l2;
+            matrix[1] =        (u* v * one_minus_cost - w* l * sint) / l2;
+            matrix[2] =        (u* w * one_minus_cost + v* l * sint) / l2;
+            matrix[3] =        ((x_orig * (v2 + w2) - u * (y_orig * v + z_orig * w)) * one_minus_cost + (y_orig * w - z_orig * v) * l * sint) / l2;
+
+            matrix[4] =        (u* v * one_minus_cost + w* l * sint) / l2;
+            matrix[5] =        (v2 + (u2 + w2) * cost) / l2;
+            matrix[6] =        (v* w * one_minus_cost - u* l * sint) / l2;
+            matrix[7] =        ((y_orig * (u2 + w2) - v * (x_orig * u + z_orig * w)) * one_minus_cost + (z_orig * u - x_orig * w) * l * sint) / l2;
+
+            matrix[8] =        (u* w * one_minus_cost - v* l * sint) / l2;
+            matrix[9] =        (v* w * one_minus_cost + u* l * sint) / l2;
+            matrix[10] =        (w2 + (u2 + v2) * cost) / l2;
+            matrix[11] =        ((z_orig * (u2 + v2) - w * (x_orig * u + y_orig * v)) * one_minus_cost + (x_orig * v - y_orig * u) * l * sint) / l2;
+        }
+
+__global__ void rotate(float* in, int* mask, float angle, float* in_r, int iter, float precision, int curr_start, int curr_stop)
 {
 	// each thread will transform the coordinates of one atom
-	int x = threadId.x;
-	int y = threadId.x + blockDim.x;
-	int z = threadId.x + 2*blockDim.x;
+	int x = threadIdx.x;
+	int y = threadIdx.x + blockDim.x;
+	int z = threadIdx.x + 2*blockDim.x;
 
-        // gets current coordinates
-	const float prev_x = in[x];
-	const float prev_y = in[y];
-	const float prev_z = in[z];
-
-        // one read is better than three (rotation_matrix is on constant memory)
-	const float m11 = rotation_matrix[0];
-	const float m12 = rotation_matrix[1];
-	const float m13 = rotation_matrix[2];
-	const float m14 = rotation_matrix[3];
-	const float m21 = rotation_matrix[4];
-	const float m22 = rotation_matrix[5];
-	const float m23 = rotation_matrix[6];
-	const float m24 = rotation_matrix[7];
-	const float m31 = rotation_matrix[8];
-	const float m32 = rotation_matrix[9];
-    const float m33 = rotation_matrix[10];
-	const float m34 = rotation_matrix[11];
-
-    // update in (the one that is allocated in the GPU)
-	in[x] = m11 * prev_x + m12 * prev_y + m13 * prev_z + m14;
-	in[y] = m21 * prev_x + m22 * prev_y + m23 * prev_z + m24;
-	in[z] = m31 * prev_x + m32 * prev_y + m33 * prev_z + m34;
-
+	float m[12];
+	compute_matrix(angle*precision,in[curr_start],in[curr_start+N_ATOMS],in[curr_start+2*N_ATOMS],in[curr_stop],in[curr_stop+N_ATOMS], in[curr_stop+2*N_ATOMS], m);
+	  
+	if(mask[x+iter*N_ATOMS]==1){
+		// gets current coordinates
+		const float prev_x = in[x];
+		const float prev_y = in[y];
+		const float prev_z = in[z];
+	    // update in (the one that is allocated in the GPU)
+		in_r[x] = m[0] * prev_x + m[1] * prev_y + m[2] * prev_z + m[3];
+		in_r[y] = m[4] * prev_x + m[5] * prev_y + m[6] * prev_z + m[7];
+		in_r[z] = m[8] * prev_x + m[9] * prev_y + m[10] * prev_z + m[11];
+	}
 }
 
 
 __global__ void measure_shotgun (float* atoms, float* pocket, float* scores, int index)
 {
-    unsigned int threadsPerBlock = THREADSPERBLOCK;
-    unsigned int blocks = BLOCKS;
 
     // one entry per atom processed within block (don't know if it's actually faster)
-    __shared__ float cache[threadsPerBlock];
+    __shared__ float cache[THREADSPERBLOCK];
 
     // each thread will process one atom
-    int x = threadId.x;
-    int y = threadId.x + blockDim.x;
-    int z = threadId.x + 2*blockDim.x;
+    int x = threadIdx.x;
+    int y = threadIdx.x + blockDim.x;
+    int z = threadIdx.x + 2*blockDim.x;
 
     unsigned int cacheIndex = x;
-    float blockScore[blocks] // one entry per block
+    float blockScore[BLOCKS]; // one entry per block
 
-    // get the average score
-    int score = 0;
-
-    int index_x = atoms[x]  * grid_factor_d;
-    int index_y = atoms[y]  * grid_factor_d;
-    int index_z = atoms[z]  * grid_factor_d;
+    int index_x = atoms[x]  * GRID_FACTOR_D;
+    int index_y = atoms[y]  * GRID_FACTOR_D;
+    int index_z = atoms[z]  * GRID_FACTOR_D;
 
     if (index_x < 0) index_x = 0;
     if (index_x > 100) index_x = 100;
@@ -77,7 +109,7 @@ __global__ void measure_shotgun (float* atoms, float* pocket, float* scores, int
     if (index_z > 100) index_z = 100;
 
     // perform reduction (compute partial block score)
-    cache[cacheIndex] = tex1Dfetch(pocket, index_x+100*index_y+10000*index_z);
+    cache[cacheIndex] = tex1Dfetch(texScore_pos, index_x+100*index_y+10000*index_z);
 
     __syncthreads();
 
@@ -92,7 +124,7 @@ __global__ void measure_shotgun (float* atoms, float* pocket, float* scores, int
     }
 
     if(cacheIndex == 0) {
-      blockScore[BlockId.x] = cache[cacheIndex];
+      blockScore[blockIdx.x] = cache[cacheIndex];
     }
 
     __syncthreads(); // probably unnecessary, or probably should be __threadfence_block()
@@ -103,101 +135,103 @@ __global__ void measure_shotgun (float* atoms, float* pocket, float* scores, int
 
 
 //I pass is_bumping for thread from each block to access it
-__device__ void fragment_is_bumping(const float* in, const int* mask, bool &cache_is_bumping, int i){
+__global__ void fragment_is_bumping(const float* in, const int* mask, bool* cache_is_bumping, int res){
 
-	//trovare il modo di mettere is_bumping a 0
-	__shared__ int is_bumping=0;
-
+	__shared__ bool all_bumps[INSIZE*(INSIZE-1)/2];
 	//spawn n_atoms threads per block and n_atoms blocks
-	const int ix = threadId.x; 
-	const int jx = BlockId.x; 
-	const int iy = threadId.x + blockDim.x; 
-	const int jy = BlockId.x + blockDim.x; 
-	const int iz = threadId.x + 2*blockDim.x; 
-	const int jz = BlockId.x + 2*blockDim.x;
+	const int ix = threadIdx.x; 
+	const int jx = threadIdx.y; 
+	const int iy = threadIdx.x + blockDim.x; 
+	const int jy = threadIdx.y + blockDim.x; 
+	const int iz = threadIdx.x + 2*blockDim.x; 
+	const int jz = threadIdx.y + 2*blockDim.x;
 
+	
 	if(jx>ix){
 		if(fabsf(mask[ix]-mask[jx]) == 1){
 
 			const float diff_x = in[ix] - in[jx];
 	        const float diff_y = in[iy] - in[jy];
 	        const float diff_z = in[iz] - in[jz];
+
+	        //MAGIC, DO NOT TOUCH
+	        const int cacheIndex = (ix==0)?0:(ix+1)*(INSIZE-1)+jx-ix-1;
 	        
 	        const float distance2 = diff_x * diff_x +  diff_y * diff_y +  diff_z * diff_z;
-	        
-	        //there could be multiple accesses to is_bumping! 
-	        //Should we avoid it? (WAW to same value, there should be no problem)
-			if (distance2 < LIMIT_DISTANCE2) is_bumping = 1;
+
+			if (distance2 < LIMIT_DISTANCE2) all_bumps[cacheIndex] = true;
+			else all_bumps[cacheIndex] = false;
+
+			__syncthreads();
+
+    		int i = INSIZE*(INSIZE-1)/4;
+
+    		while (i != 0) {
+	      		if (cacheIndex < i) {
+	        		all_bumps[cacheIndex] |= all_bumps[cacheIndex + i];
+	        		__syncthreads();
+	      		}
+      			i /= 2;
+    		}
+
+    		if(cacheIndex == 0) {
+      		cache_is_bumping[res] = all_bumps[cacheIndex];
+    		}
 		}
 	}
-
-	//provare a usare il log2()
-	cache_is_bumping[i] = is_bumping;
-
-
 }
 
+__global__ void eval_angles(float* in, float* score_pos, int curr_start, int curr_stop, int* mask, float precision, int iter) {
 
-__global__ void eval_angles(float* in, float* score_pos, int& best_angle, int& best_score, free_rotation::value_type& best_rotation_matrix, int start_index, int stop_index, int* mask) {
+  	// each thread will evaluate an angle and put the score on the cache (cache_score)
+  	int angle = threadIdx.x, best_angle=0;
 
-	//da controllare ;a dim dei thread
-  int threadsPerBlock = THREADSPERBLOCK;
-  int Blocks = BLOCKS;
-  int cacheDim = blockDim.x;
+	// I want to get the angle that scores most without bumping, so I need 2 caches
+	__shared__ float cache_score[THREADSPERBLOCK];
+	__shared__ bool cache_is_bumping[THREADSPERBLOCK];
 
-  // each thread will evaluate an angle and put the score on the cache (cache_score)
-  //Modifica: passa precision
-  int angle = threadId.x;
+	// I found that this cache is necessary in the reduction phase to avoid WAWs
+	__shared__ int best_angles[THREADSPERBLOCK];
 
-  //precision = 0.6
-  //threadId = 1 -> angolo = precision
-  //threadId = 2 -> angolo = 2*precision
+	unsigned int cacheIndex = angle;
+	dim3 bumpdim(INSIZE,INSIZE,1);
+      
+      //if(DEBUG) printf("(%d: -)\n", angle);
 
-  	//implementa compute_matrix e trasforma in float l'angolo
-	compute_matrix(angle,in[start_index],in[start_index+NATOMS],in[start_index+2*NATOMS],in[stop_index],in[stop_index+NATOMS], in[stop_index+2*NATOMS]);
-	rotate<<<threadsPerBlock,Blocks>>>(in, &mask[i*n_atoms], rotation_matrix);
+	  rotate<<<BLOCKS,THREADSPERBLOCK>>>(in, mask, angle, &in[angle*MAX_ANGLE], iter, precision, curr_start, curr_stop);
 
-  // I want to get the angle that scores most without bumping, so I need 2 caches
-  __shared__ float cache_score[cacheDim];
-  __shared__ bool cache_is_bumping[cacheDim];
+	  best_angles[cacheIndex] = angle;
 
-  // I found that this cache is necessary in the reduction phase to avoid WAWs
-  __shared__ int best_angles[threadsPerBlock];
-  unsigned int cacheIndex = angle;
-  best_angles[cacheIndex] = angle;
+	  cache_is_bumping[angle]=0;
 
-  //ricontrollare conversione index <-> angle
-  measure_shotgun<<<threadsPerBlock/Blocks,Blocks>>>(in, score_pos, &cache_score, angle);  // populates the scores cache
-  
-  if(DEBUG) printf("score is: %d for fragm %d with angle %.4f\n", score, i, j);
-  
-  fragment_is_bumping<<<threadsPerBlock,256>>>(in, &mask[i*n_atoms], &cache_is_bumping, angle); // populates the is_bumping cache
+	  measure_shotgun<<<BLOCKS,THREADSPERBLOCK>>>(&in[angle*MAX_ANGLE], score_pos, cache_score, angle);  // populates the scores cache
 
-	// doubt: I don't know if I can pass shared caches to other nested kernels in total tranquility (I think so).
-	// If not, we need a "buffer" array for the function that will be flushed into the cache (not so bad)
+	  //if(DEBUG) printf("score is: %d for fragm %d with angle %f\n", cache_score, angle, angle*precision);
+	  
+	  fragment_is_bumping<<<BLOCKS,bumpdim>>>(&in[angle*MAX_ANGLE], mask, cache_is_bumping, angle); // populates the is_bumping cache
 
-  __syncthreads();
+		// doubt: I don't know if I can pass shared caches to other nested kernels in total tranquility (I think so).
+		// If not, we need a "buffer" array for the function that will be flushed into the cache (not so bad)
 
-  unsigned int i = blockDim.x/2;
+	  unsigned int i = blockDim.x/2;
 
-  // get the highest non-bumping score
-  while (i != 0) {
-    if (cacheIndex < i) {
-      if (cache_score[cacheIndex] < cache_score[cacheIndex + i] && !cache_is_bumping[cacheIndex + i]) {
-        cache[cacheIndex] = cache[cacheIndex + i];
-        best_angle[cacheIndex] = cacheIndex + i;
-      }
-      __syncthreads();
-    }
-    i /= 2;
-  }
+	  // get the highest non-bumping score
+	  while (i != 0) {
+	    if (cacheIndex < i) {
+	      if (cache_score[cacheIndex] < cache_score[cacheIndex + i] && !cache_is_bumping[cacheIndex + i]) {
+	        cache_score[cacheIndex] = cache_score[cacheIndex + i];
+	        best_angles[cacheIndex] = cacheIndex + i;
+	      }
+	      __syncthreads();
+	    }
+	    i /= 2;
+	  }
 
-  if(cacheIndex == 0) {
-    best_score = cache[cacheIndex];
-    best_angle = best_angle[cacheIndex];
-  	//ricalcolo la matrice
-  	//modifico in
-  }
+	  if(cacheIndex == 0) {
+	    //best_score = cache_score[cacheIndex];
+	    best_angle = best_angles[cacheIndex];
+	  	rotate<<<BLOCKS,THREADSPERBLOCK>>>(in, mask, best_angle, in, iter, precision, curr_start, curr_stop);
+	  }
 }
 
 //Speed improvements:
@@ -205,64 +239,57 @@ __global__ void eval_angles(float* in, float* score_pos, int& best_angle, int& b
 //1) (having n_atoms as global) remove the indexing by "+blockDim.x" in the kernels to use "+N_ATOMS", that is a predefined variable (so it's faster to access?)
 //2) If we want to have a greater parallelism, we could put the malloc and the memcpy on different streams (not requested for this project by the professor)
 //3) Check if it's convenient to remove the 'i' parameter from some kernels and use the '&mask[i*N_ATOMS]' instead
-//4) [put other ideas to test later here]
+//4) METTERE GLI STREAM
 
-void ps_kern(float* in, float* out, int precision, float* score_pos, int* start, int* stop, int* mask )
+void ps_kern(float* in, float* out, float precision, float* score_pos, int* start, int* stop, int* mask, int n_frags)
 {
-	float *d_in, *d_score_pos, *d_rotation_matrix;
-	int *d_mask;
+	float *d_in, *d_score_pos, d_best_angle;
+	int *d_mask, d_best_score;
 
-	cudaError_t status, status_cp, status_tx;
-	
-	//Dimensions of block and grid for the 'fragment_is_bumping' functions
-	dim3 bumping_block(INSIZE,1,1); //256,1,1
-	dim3 bumping_grid(INSIZE,MAX_ANGLE*1/precision,1); //256,256,1
+	cudaError_t status, status_cp, status_tx, status_wb;;
 
 	//GPU MEMORY INITIALIZATION
-	texture<float> texScore_pos;
-	texture<int> texMask;
 	
-	status = cudaMalloc((void**) &d_in, sizeof(float)*INSIZE);
+	status = cudaMalloc((void**) &d_in, sizeof(float)*INSIZE*MAX_ANGLE/precision);
 	if(DEBUG && status!=cudaSuccess)
-		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+		printf("%s in %s at line %d\n", cudaGetErrorString(status), __FILE__, __LINE__);
 
 	status_cp = cudaMemcpy(d_in, in, sizeof(float)*INSIZE, cudaMemcpyHostToDevice);
 	if(DEBUG && status_cp!=cudaSuccess)
-		cout << cudaGetErrorString(status_cp) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+		printf("%s in %s at line %d\n", cudaGetErrorString(status_cp), __FILE__, __LINE__);
 
 	status = cudaMalloc((void**) &d_score_pos, sizeof(float)*VOLUMESIZE);
 	if(DEBUG && status!=cudaSuccess)
-		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+		printf("%s in %s at line %d\n", cudaGetErrorString(status), __FILE__, __LINE__);
 
 	status_cp = cudaMemcpy(d_score_pos, score_pos, sizeof(float)*VOLUMESIZE, cudaMemcpyHostToDevice);
 	if(DEBUG && status_cp!=cudaSuccess)
-		cout << cudaGetErrorString(status_cp) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+		printf("%s in %s at line %d\n", cudaGetErrorString(status_cp), __FILE__, __LINE__);
 
 	status = cudaMalloc((void**) &d_mask, sizeof(int)*MASKSIZE);
-  if(DEBUG && status!=cudaSuccess)
-		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+    if(DEBUG && status!=cudaSuccess)
+		printf("%s in %s at line %d\n", cudaGetErrorString(status), __FILE__, __LINE__);
 
 	status_cp = cudaMemcpy(d_mask, mask, sizeof(int)*MASKSIZE, cudaMemcpyHostToDevice);
 	if(DEBUG && status_cp!=cudaSuccess)
-		cout << cudaGetErrorString(status_cp) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+		printf("%s in %s at line %d\n", cudaGetErrorString(status_cp), __FILE__, __LINE__);
 
-	//Da controllare
-	status = cudaMalloc((void**) &d_rotation_matrix, sizeof(float)*12);
-  if(DEBUG && status!=cudaSuccess)
-		cout << cudaGetErrorString(status) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+	status = cudaMalloc((void**) &d_best_score, sizeof(int));
+    if(DEBUG && status!=cudaSuccess)
+		printf("%s in %s at line %d\n", cudaGetErrorString(status), __FILE__, __LINE__);
 
-	status_cp = cudaMemcpy(d_rotation_matrix, rotation_matrix, sizeof(float)*12, cudaMemcpyHostToDevice);
-	if(DEBUG && status_cp!=cudaSuccess)
-		cout << cudaGetErrorString(status_cp) << " in " << __FILE__ << " at line " << __LINE__ << endl;	
+	status = cudaMalloc((void**) &d_best_angle, sizeof(float));
+    if(DEBUG && status!=cudaSuccess)
+		printf("%s in %s at line %d\n", cudaGetErrorString(status), __FILE__, __LINE__);
 
   // --------------
-	status_tx = cudaBindtexture(NULL, texScore_pos, d_score_pos, sizeof(float)*VOLUMESIZE);
+	status_tx = cudaBindTexture(NULL, texScore_pos, d_score_pos, sizeof(float)*VOLUMESIZE);
 	if(DEBUG && status_tx!=cudaSuccess)
-	  cout << cudaGetErrorString(status_tx) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+		printf("%s in %s at line %d\n", cudaGetErrorString(status_tx), __FILE__, __LINE__);
 
-	status_tx = cudaBindtexture(NULL, texMask, d_mask, sizeof(int)*MASKSIZE);
+	status_tx = cudaBindTexture(NULL, texMask, d_mask, sizeof(int)*MASKSIZE);
 	if(DEBUG && status_tx!=cudaSuccess)
-		 cout << cudaGetErrorString(status_tx) << " in " << __FILE__ << " at line " << __LINE__ << endl;				
+		printf("%s in %s at line %d\n", cudaGetErrorString(status_tx), __FILE__, __LINE__);				
 
 
 	//CUDA stream creation
@@ -273,46 +300,21 @@ void ps_kern(float* in, float* out, int precision, float* score_pos, int* start,
 	cudaStreamCreate(&stream2);
 
 	// start CUDA timing here
-
-	for (int i=0;i<n_frags;++i){ //Rotameter optimization. Numbers after the cells is the stream channel.
-
-		// get the index of starting atom
-		const auto start_atom_index = start[i];
-		const auto stop_atom_index = stop[i];
-
-		int best_angle = 0;
-		float best_score = 0.0;
-		
-		free_rotation::value_type best_rotation_matrix; // Da controllare
-
-		//Da controllare dimensioni dei kernel
-		eval_angles<<<256*ceil(1/precision),1>>>(in, score_pos, best_angle, best_score, best_rotation_matrix, start_atom_index, stop_atom_index, mask);
-		
-		//get matrice
-		//calcolare il nuovo in
-		//memcopy in gpu
-
-		std::cout<<"best angle is: "<<best_angle<<std::endl;
-		std::cout<<" score is: "<<best_score<<" for fragm: "<<i<<"with angle out"<<std::endl;
+	for(int i=0; i<N_FRAGS; i++){
+		if(DEBUG) printf("ITER: %d\n", i);
+		eval_angles<<<BLOCKS,ceil(THREADSPERBLOCK/precision)>>>(d_in, d_score_pos, start[i], stop[i], d_mask, precision, i);
+		if(DEBUG) cudaDeviceSynchronize();
 	}
+	cudaDeviceSynchronize();
 	//stop CUDA timing here
-		
-	cudaError_t status_wb;
-	
-	//we (should) copy the best 'in' array back in central memory as the 'out' array 
-	//(this memcpy copies from the gpu the FIRST 'in' array (index 0-255) that isn't necessarily the best, unless "compute_best" ensures this)
-	
-	//dove finisce l'output?
-	status_wb = cudaMemcpy(out, d_in, sizeof(float)*ARRSIZE, cudaMemcpyDeviceToHost);
+
+	status_wb = cudaMemcpy(out, d_in, sizeof(float)*INSIZE, cudaMemcpyDeviceToHost);
 	if(DEBUG && status_wb!=cudaSuccess)
-		cout << cudaGetErrorString(status_wb) << " in " << __FILE__ << " at line " << __LINE__ << endl;
+		printf("%s in %s at line %d\n", cudaGetErrorString(status_wb), __FILE__, __LINE__);
 	
 	cudaUnbindTexture(texScore_pos);
 	cudaUnbindTexture(texMask);
 	cudaFree(d_score_pos);
 	cudaFree(d_mask);
-	cudaFree(d_rotation_matrix);
 	cudaFree(d_in);
 }
-
-

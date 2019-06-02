@@ -184,76 +184,6 @@ static constexpr double grid_factor_d = 0.5;
 		return score;
 	}
 
-	template <int n_atoms>
-	void align_check( float* in, float* out,int precision, float* scores)
-	{
-
-		// then we generate the rigid rotation matrices
-		const auto step_x = rigid_rotation::compute_matrix(precision,0);
-		const auto step_y = rigid_rotation::compute_matrix(0,precision);
-		float* backup = new float [n_atoms*3];
-		std::map<int, std::map<int,int> > dbg_helper;
-
-
-		for(int i=0;i<n_atoms;i++)
-		{
-			backup[i] 	   =	  in[i] 	  ;
-						backup[i+n_atoms]  =	  in[i+n_atoms]   ;
-						backup[i+2*n_atoms]=	  in[i+2*n_atoms] ;
-		}
-		// get the initial evaluation
-		auto best_score = measure_shotgun<n_atoms>(in, scores);
-		int best_angle_x = 0;
-		int best_angle_y = 0;
-
-		// loop over the first axis
-		for ( int i = 0/* precision*/; i </*=*/ static_cast<int>(256); i += precision )
-		{
-			dbg_helper.insert(std::make_pair (i,std::map<int,int>()));
-			// loop over the second axis
-			for ( int j = 0; j < static_cast<int>(256); j += precision )
-			{
-
-				// measure the pacman score
-				const auto actual_score = measure_shotgun<n_atoms>(in, scores);
-				dbg_helper[i].insert(std::make_pair(j,actual_score));
-					//std::cout<<"score (cpu): "<<actual_score<<", alfa angle is: "<< i <<" and beta angle is: "<<j<<std::endl;
-				// update the scoring function
-				if (actual_score > best_score)
-				{
-					best_score = actual_score;
-					best_angle_x = i;
-					best_angle_y = j;
-				}
-				rotate<n_atoms>(in, step_y);
-			}
-			rotate<n_atoms>(in, step_x);
-
-		}
-		//DEBUG
-		/*
-		for (int i=0;i<256; i+=precision)
-			for (int j=0;j<256; j+=precision)
-				std::cout<<"score is: "<<dbg_helper.at(j).at(i)<<" for angle x: "<<j<<" and y: "<<i<<std::endl;
-
-
-		std::cout<<" END: best angle is: "<<best_angle_x<<" and y: "<<best_angle_y<<std::endl;
-*/
-//		std::cout<<"xpos is: "<<in[0]<<std::endl;
-		// place the ligand in the best position found
-		const auto optimal_rotation = rigid_rotation::compute_matrix(static_cast<float>(best_angle_x), static_cast<float>(best_angle_y));
-		rotate<n_atoms>(backup, optimal_rotation);
-		for(int i=0; i<n_atoms; i++)
-		{
-			out[i]	 	=  backup[i];
-///			std::cout<<"out "<< i <<" is: "<<out[i]<<std::endl;
-			out[i+n_atoms]  =  backup[i+n_atoms]  ;
-			out[i+2*n_atoms]=  backup[i+2*n_atoms];
-		}
-	}
-
-
-
 	template<int n_atoms>
     inline bool fragment_is_bumping( const float* in, const int* mask)
     {
@@ -304,9 +234,6 @@ static constexpr double grid_factor_d = 0.5;
 		// optimize each rotamer
 		for ( int i = 0; i < n_frags; ++i )
 		{
-        		// compute the epsilon value for floating point precision
-		        const auto epsilon = std::numeric_limits<float>::epsilon();
-
 		        // get the index of starting atom
 		        const auto start_atom_index = start[i];
 		        const auto stop_atom_index = stop[i];
@@ -316,7 +243,7 @@ static constexpr double grid_factor_d = 0.5;
 			// declare the variables for driving the optimization
 			int best_angle = 0;
 			int best_score = measure_shotgun<n_atoms>(in, score_pos);
-			    std::cout<<"init: best score is: "<<best_score<<std::endl;
+			    //std::cout<<"init: best score is: "<<best_score<<std::endl;
 			bool is_best_bumping = fragment_is_bumping<n_atoms>(in, &mask[i*n_atoms]);
 			// optimize shape
 			for ( int j = 0 ; j < 256; j += precision )
@@ -335,7 +262,7 @@ static constexpr double grid_factor_d = 0.5;
 #endif
 			// compute the score
 			    const int score = measure_shotgun<n_atoms>(in, score_pos);
-			    std::cout<<" score is: "<<score<<" for fragm: "<<i<<"with angle: "<<j<<std::endl;
+			    //std::cout<<" score is: "<<score<<" for fragm: "<<i<<"with angle: "<<j<<std::endl;
 			    // check if we have to update the best
 			    if (score > best_score)
 			    {
@@ -363,9 +290,9 @@ static constexpr double grid_factor_d = 0.5;
 			    }
 			    rotate<n_atoms>(in, &mask[i*n_atoms], rotation_matrix);
 			}
-			std::cout<<"best angle is: "<<best_angle<<std::endl;
+			//td::cout<<"best angle is: "<<best_angle<<std::endl;
 			const int score = measure_shotgun<n_atoms>(in, score_pos);
-			std::cout<<" score is: "<<score<<" for fragm: "<<i<<"with angle out"<<std::endl;
+			//std::cout<<" score is: "<<score<<" for fragm: "<<i<<"with angle out"<<std::endl;
 			const auto rotation_matrix_best = free_rotation::compute_matrix(best_angle,in[start_atom_index],in[start_atom_index+n_atoms],in[start_atom_index+2*n_atoms],in[stop_atom_index],in[stop_atom_index+n_atoms],  in[stop_atom_index+2*n_atoms]);
     			rotate<n_atoms>(in, &mask[i*n_atoms], rotation_matrix_best );
     		}
