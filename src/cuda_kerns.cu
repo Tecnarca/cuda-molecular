@@ -149,7 +149,9 @@ __global__ void fragment_is_bumping(const float* in, const int* mask, bool* cach
 	const int cacheIndex = (ix==0)?0+jx-ix-1:(ix+1)*(INSIZE-1)+jx-ix-1;
 	
 	if(jx>ix){
-		if(fabsf(mask[ix]-mask[jx]) == 1){
+		int m_ix = tex1dfetch(texMask, ix);
+		int m_jx = tex1dfetch(texMask, jx);
+		if(fabsf(m_ix - m_jx) == 1){
 
 			const float diff_x = in[ix] - in[jx];
 	        const float diff_y = in[iy] - in[jy];
