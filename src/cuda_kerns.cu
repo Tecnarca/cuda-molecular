@@ -70,7 +70,7 @@ __global__ void rotate(float* in, int* mask, float angle, float* in_r, int iter,
 	float m[12];
 	compute_matrix(angle*precision,in[curr_start],in[curr_start+N_ATOMS],in[curr_start+2*N_ATOMS],in[curr_stop],in[curr_stop+N_ATOMS], in[curr_stop+2*N_ATOMS], m);
 	  
-	mask_x = tex1dfetch(mask, x+iter*N_ATOMS);
+	int mask_x = tex1dfetch(mask, x+iter*N_ATOMS);
 	if(mask_x == 1){
 		// gets current coordinates
 		const float prev_x = in[x];
