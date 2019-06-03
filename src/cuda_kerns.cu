@@ -70,7 +70,7 @@ __global__ void rotate(float* in, int* mask, float angle, float* in_r, int iter,
 	float m[12];
 	compute_matrix(angle*precision,in[curr_start],in[curr_start+N_ATOMS],in[curr_start+2*N_ATOMS],in[curr_stop],in[curr_stop+N_ATOMS], in[curr_stop+2*N_ATOMS], m);
 	  
-	int mask_x = tex1dfetch(texMask, x+iter*N_ATOMS);
+	int mask_x = tex1Dfetch(texMask, x+iter*N_ATOMS);
 	if(mask_x == 1){
 		// gets current coordinates
 		const float prev_x = in[x];
@@ -147,11 +147,11 @@ __global__ void fragment_is_bumping(const float* in, const int* mask, bool* cach
 	const int iz = threadIdx.x + 2*blockDim.x; 
 	const int jz = threadIdx.y + 2*blockDim.x;
 	//Unique sequential index for threads with jx>ix
-	const int cacheIndex = ix*(INSIZE-1)-ix*(ix-1)+(ix-1)*ix/2+jx-x-1;
+	const int cacheIndex = ix*(INSIZE-1)-ix*(ix-1)+(ix-1)*ix/2+jx-ix-1;
 	
 	if(jx>ix){
-		int m_ix = tex1dfetch(texMask, ix);
-		int m_jx = tex1dfetch(texMask, jx);
+		int m_ix = tex1Dfetch(texMask, ix);
+		int m_jx = tex1Dfetch(texMask, jx);
 		if(fabsf(m_ix - m_jx) == 1){
 
 			const float diff_x = in[ix] - in[jx];
@@ -205,7 +205,7 @@ __global__ void eval_angles(float* in, float* score_pos, int curr_start, int cur
 
 	  cache_is_bumping[angle]=0;
 
-	  measure_shotgun<<<3, ceil(NATOMS/3) >>>(&in[angle*MAX_ANGLE], score_pos, cache_score, angle);  // populates the scores cache
+	  measure_shotgun<<<3, ceil(N_ATOMS/3) >>>(&in[angle*MAX_ANGLE], score_pos, cache_score, angle);  // populates the scores cache
 
 	  //if(DEBUG) printf("score is: %d for fragm %d with angle %f\n", cache_score, angle, angle*precision);
 	  
