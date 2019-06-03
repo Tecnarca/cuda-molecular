@@ -146,8 +146,8 @@ __global__ void fragment_is_bumping(const float* in, const int* mask, bool* cach
 	const int jy = threadIdx.y + blockDim.x; 
 	const int iz = threadIdx.x + 2*blockDim.x; 
 	const int jz = threadIdx.y + 2*blockDim.x;
-	//Ricontrollare la formula
-	const int cacheIndex = (ix==0)?0+jx-ix-1:(ix+1)*(INSIZE-1)+jx-ix-1;
+	//Unique sequential index for threads with jx>ix
+	const int cacheIndex = ix*(INSIZE-1)-ix*(ix-1)+(ix-1)*ix/2+jx-x-1;
 	
 	if(jx>ix){
 		int m_ix = tex1dfetch(texMask, ix);
@@ -205,7 +205,7 @@ __global__ void eval_angles(float* in, float* score_pos, int curr_start, int cur
 
 	  cache_is_bumping[angle]=0;
 
-	  measure_shotgun<<<BLOCKS,THREADSPERBLOCK>>>(&in[angle*MAX_ANGLE], score_pos, cache_score, angle);  // populates the scores cache
+	  measure_shotgun<<<3, ceil(NATOMS/3) >>>(&in[angle*MAX_ANGLE], score_pos, cache_score, angle);  // populates the scores cache
 
 	  //if(DEBUG) printf("score is: %d for fragm %d with angle %f\n", cache_score, angle, angle*precision);
 	  
