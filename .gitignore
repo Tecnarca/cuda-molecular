@@ -2,3 +2,5 @@
 src/cuda_kerns.cpp
 src/measure_shotgun.cpp
 src/rotate.cpp
+build/
+script.sh
