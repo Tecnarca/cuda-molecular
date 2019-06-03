@@ -62,6 +62,10 @@ __device__ void compute_matrix( const float rotation_angle,
 
 __global__ void rotate(float* in, int* mask, float angle, float* in_r, int iter, float precision, int curr_start, int curr_stop)
 {
+	if(angle == 0.0) {
+		return;
+	}
+	
 	// each thread will transform the coordinates of one atom
 	int x = threadIdx.x;
 	int y = threadIdx.x + blockDim.x;
