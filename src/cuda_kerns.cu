@@ -205,7 +205,7 @@ __global__ void eval_angles(float* in, float* score_pos, int curr_start, int cur
 
 	  cache_is_bumping[angle]=0;
 
-	  measure_shotgun<<<3, ceil(N_ATOMS/3) >>>(&in[angle*MAX_ANGLE], score_pos, cache_score, angle);  // populates the scores cache
+	  measure_shotgun<<<3, ceilf(N_ATOMS/3) >>>(&in[angle*MAX_ANGLE], score_pos, cache_score, angle);  // populates the scores cache
 
 	  //if(DEBUG) printf("score is: %d for fragm %d with angle %f\n", cache_score, angle, angle*precision);
 	  
