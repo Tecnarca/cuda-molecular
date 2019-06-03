@@ -303,7 +303,7 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	// start CUDA timing here
 	for(int i=0; i<N_FRAGS; i++){
 		if(DEBUG) printf("ITER: %d\n", i);
-		eval_angles<<<BLOCKS,ceil(THREADSPERBLOCK/precision)>>>(d_in, d_score_pos, start[i], stop[i], d_mask, precision, i);
+		eval_angles<<<BLOCKS,ceilf(THREADSPERBLOCK/precision)>>>(d_in, d_score_pos, start[i], stop[i], d_mask, precision, i);
 		if(DEBUG) cudaDeviceSynchronize();
 	}
 	cudaDeviceSynchronize();
