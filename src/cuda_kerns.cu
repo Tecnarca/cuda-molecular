@@ -24,7 +24,7 @@ texture<int> texMask;
 __device__ void compute_matrix( const float rotation_angle,
                 const float x_orig, const float y_orig, const float z_orig,
                 const float x_vector, const float y_vector, const float z_vector, float* matrix){
-            
+
             // compute the rotation axis
             const float u = (float)x_vector - x_orig;
             const float v = (float)y_vector - y_orig;
@@ -65,14 +65,14 @@ __global__ void rotate(float* in, int* mask, float angle, float* in_r, int iter,
 	if(angle == 0.0) {
 		return;
 	}
-	
+
 	// each thread will transform the coordinates of one atom
 	int x = threadIdx.x;
 	int y = threadIdx.x + blockDim.x;
 	int z = threadIdx.x + 2*blockDim.x;
 	float m[12];
 	compute_matrix(angle*precision,in[curr_start],in[curr_start+N_ATOMS],in[curr_start+2*N_ATOMS],in[curr_stop],in[curr_stop+N_ATOMS], in[curr_stop+2*N_ATOMS], m);
-	 
+
 	int mask_x = tex1Dfetch(texMask, x+iter*N_ATOMS);
 	 if(mask_x == 1){
 		// gets current coordinates
@@ -87,7 +87,7 @@ __global__ void rotate(float* in, int* mask, float angle, float* in_r, int iter,
 }
 
 //aggiustare in un blocco solo
-__global__ void measure_shotgun (float* atoms, float* pocket, float* scores, int index)
+__global__ void measure_shotgun (float* atoms, float* pocket, float& angle_index)
 {
 
     // one entry per atom processed within block (don't know if it's actually faster)
@@ -130,8 +130,7 @@ __global__ void measure_shotgun (float* atoms, float* pocket, float* scores, int
 
     if(cacheIndex == 0) {
       if(index<0 || index > THREADSPERBLOCK-1)printf("(i: %d) ", index); //0 printfs
-      scores[index] = cache[0];
-      atoms[index] = 0;
+      angle_index = cache[0];
     }
 }
 
@@ -141,15 +140,15 @@ __global__ void fragment_is_bumping(float* in, const int* mask, bool* cache_is_b
 
 	__shared__ bool all_bumps[INSIZE*(INSIZE-1)/2];
 	//spawn n_atoms threads per block and n_atoms blocks
-	int ix = threadIdx.x; 
-	int jx = threadIdx.y; 
-	int iy = threadIdx.x + blockDim.x; 
-	int jy = threadIdx.y + blockDim.x; 
-	int iz = threadIdx.x + 2*blockDim.x; 
+	int ix = threadIdx.x;
+	int jx = threadIdx.y;
+	int iy = threadIdx.x + blockDim.x;
+	int jy = threadIdx.y + blockDim.x;
+	int iz = threadIdx.x + 2*blockDim.x;
 	int jz = threadIdx.y + 2*blockDim.x;
 	//Unique sequential index for threads with jx>ix
 	int cacheIndex = ix*(INSIZE-1)-ix*(ix-1)+(ix-1)*ix/2+jx-ix-1;
-	
+
 	if(jx>ix){
 		//int m_ix = tex1Dfetch(texMask, ix);
 		//int m_jx = tex1Dfetch(texMask, jx);
@@ -158,7 +157,7 @@ __global__ void fragment_is_bumping(float* in, const int* mask, bool* cache_is_b
 			const float diff_x = in[ix] - in[jx];
 	        const float diff_y = in[iy] - in[jy];
 	        const float diff_z = in[iz] - in[jz];
-	        
+
 	        const float distance2 = diff_x * diff_x +  diff_y * diff_y +  diff_z * diff_z;
 
 			if (distance2 < LIMIT_DISTANCE2) all_bumps[cacheIndex] = true;
@@ -195,11 +194,11 @@ __global__ void eval_angles(float* in, float* score_pos, int curr_start, int cur
 	__shared__ int best_angles[THREADSPERBLOCK];
 
 	unsigned int cacheIndex = angle;
-	
+
 
 
 	dim3 bumpdim(INSIZE,INSIZE,1);
-      
+
 	//printf("%f",in[angle*N_ATOMS]);
 
 	  best_angles[cacheIndex] = angle;
@@ -208,10 +207,12 @@ __global__ void eval_angles(float* in, float* score_pos, int curr_start, int cur
 
 	  rotate<<<BLOCKS,THREADSPERBLOCK>>>(in, mask, angle, &in[angle*N_ATOMS], iter, precision, curr_start, curr_stop);
 
-	  measure_shotgun<<<1, INSIZE >>>(&in[angle*N_ATOMS], score_pos, cache_score, angle);  // populates the scores cache
-
+    float angle_score = 0.0;
+	  measure_shotgun<<<1, INSIZE >>>(&in[angle*N_ATOMS], score_pos, angle_score);  // populates the scores cache
+    cache_score[cacheIndex] = angle_score;
+    __syncthreads();
 	  //if(DEBUG) printf("score is: %d for fragm %d with angle %f\n", cache_score, angle, angle*precision);
-	  
+
 	  //fragment_is_bumping<<<1,bumpdim>>>(&in[angle*N_ATOMS], mask, cache_is_bumping, angle); // populates the is_bumping cache
 
 		// doubt: I don't know if I can pass shared caches to other nested kernels in total tranquility (I think so).
@@ -253,7 +254,7 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	cudaError_t status, status_cp, status_tx, status_wb;;
 
 	//GPU MEMORY INITIALIZATION
-	
+
 	status = cudaMalloc((void**) &d_in, sizeof(float)*INSIZE*MAX_ANGLE);
 	if(DEBUG && status!=cudaSuccess)
 		printf("%s in %s at line %d\n", cudaGetErrorString(status), __FILE__, __LINE__);
@@ -294,7 +295,7 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 
 	status_tx = cudaBindTexture(NULL, texMask, d_mask, sizeof(int)*MASKSIZE);
 	if(DEBUG && status_tx!=cudaSuccess)
-		printf("%s in %s at line %d\n", cudaGetErrorString(status_tx), __FILE__, __LINE__);				
+		printf("%s in %s at line %d\n", cudaGetErrorString(status_tx), __FILE__, __LINE__);
 
 	// start CUDA timing here
 	for(int i=0; i<N_FRAGS; i++){
@@ -308,7 +309,7 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	status_wb = cudaMemcpy(out, d_in, sizeof(float)*INSIZE, cudaMemcpyDeviceToHost);
 	if(DEBUG && status_wb!=cudaSuccess)
 		printf("%s in %s at line %d\n", cudaGetErrorString(status_wb), __FILE__, __LINE__);
-	
+
 	cudaUnbindTexture(texScore_pos);
 	cudaUnbindTexture(texMask);
 	cudaFree(d_score_pos);
