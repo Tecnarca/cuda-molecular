@@ -17,9 +17,9 @@
 #include <cuda_kerns.h>
 #include <stdio.h>
 
-texture<float> texScore_pos;
-//di mask non stiamo a usà il fatto che è una texture (?)
-texture<int> texMask;
+//MODIFIED FOR TEXTURE OBJECTS
+texture<float, 1, cudaReadElementType> texScore_pos;
+texture<int, 1, cudaReadElementType> texMask;
 
 __device__ void compute_matrix( const float rotation_angle,
                 const float x_orig, const float y_orig, const float z_orig,
@@ -181,7 +181,8 @@ __global__ void fragment_is_bumping(float* in, const int* mask, bool* cache_is_b
 	}
 }
 
-__global__ void eval_angles(float* in, float* score_pos, int curr_start, int curr_stop, int* mask, float precision, int iter) {
+//MODIFIED ARGS FOR TEXTURE OBJECTS
+__global__ void eval_angles(float* in, cudaTextureObject_t score_pos, int curr_start, int curr_stop, cudaTextureObject_t mask, float precision, int iter) {
 
   	// each thread will evaluate an angle and put the score on the cache (cache_score)
   	int angle = threadIdx.x, best_angle=0;
@@ -288,19 +289,41 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
     if(DEBUG && status!=cudaSuccess)
 		printf("%s in %s at line %d\n", cudaGetErrorString(status), __FILE__, __LINE__);
 
-  // --------------
-	status_tx = cudaBindTexture(NULL, texScore_pos, d_score_pos, sizeof(float)*VOLUMESIZE);
-	if(DEBUG && status_tx!=cudaSuccess)
-		printf("%s in %s at line %d\n", cudaGetErrorString(status_tx), __FILE__, __LINE__);
+  // --------------TEXTURE OBJECTS
+  cudaResourceDesc resDesc1;
+    memset(&resDesc, 0.0, sizeof(resDesc1));
+    resDesc1.resType = cudaResourceTypeLinear;
+    resDesc1.res.linear.devPtr = d_score_pos;
+    resDesc1.res.linear.desc.f = cudaChannelFormatKindFloat;
+    resDesc1.res.linear.desc.x = 32; // bits per channel
+    resDesc1.res.linear.sizeInBytes = VOLUMESIZE*sizeof(float);
 
-	status_tx = cudaBindTexture(NULL, texMask, d_mask, sizeof(int)*MASKSIZE);
-	if(DEBUG && status_tx!=cudaSuccess)
-		printf("%s in %s at line %d\n", cudaGetErrorString(status_tx), __FILE__, __LINE__);
+  cudaResourceDesc resDesc2;
+    memset(&resDesc, 0, sizeof(resDesc2));
+    resDesc2.resType = cudaResourceTypeLinear;
+    resDesc2.res.linear.devPtr = d_mask;
+    resDesc2.res.linear.desc.f = cudaChannelFormatKindFloat;
+    resDesc2.res.linear.desc.x = 32; // bits per channel
+    resDesc2.res.linear.sizeInBytes = MASKSIZE*sizeof(int);
+
+  cudaTextureDesc texDesc1;
+    memset(&texDesc1, 0.0, sizeof(texDesc1));
+    texDesc1.readMode = cudaReadModeElementType;
+
+  cudaTextureDesc texDesc2;
+    memset(&texDesc2, 0, sizeof(texDesc2));
+    texDesc2.readMode = cudaReadModeElementType;
+
+  cudaTextureObject_t texScore_pos=0;
+  cudaTextureObject_t texMask=0;
+  cudaCreateTextureObject(&texScore_pos, &resDesc1, &texDesc1, NULL);
+  cudaCreateTextureObject(&texMask, &resDesc2, &texDesc2, NULL);
+  //----------------------------------
 
 	// start CUDA timing here
 	for(int i=0; i<N_FRAGS; i++){
 		//if(DEBUG) printf("ITER: %d\n", i);
-		eval_angles<<<BLOCKS,MAX_ANGLE>>>(d_in, d_score_pos, start[i], stop[i], d_mask, precision, i);
+		eval_angles<<<BLOCKS,MAX_ANGLE>>>(d_in, texScore_pos, start[i], stop[i], texMask, precision, i);  //MODIFIED WITH TEXTURE REFS
 		//if(DEBUG) cudaDeviceSynchronize();
 	}
 	cudaDeviceSynchronize();
@@ -310,8 +333,9 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	if(DEBUG && status_wb!=cudaSuccess)
 		printf("%s in %s at line %d\n", cudaGetErrorString(status_wb), __FILE__, __LINE__);
 
-	cudaUnbindTexture(texScore_pos);
-	cudaUnbindTexture(texMask);
+  cudaDestroyTextureObject(texScore_pos);
+  cudaDestroyTextureObject(texMask);
+
 	cudaFree(d_score_pos);
 	cudaFree(d_mask);
 	cudaFree(d_in);
