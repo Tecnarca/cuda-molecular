@@ -4,3 +4,4 @@ src/measure_shotgun.cpp
 src/rotate.cpp
 build/
 script.sh
+comments/ps_check_steps.txt
