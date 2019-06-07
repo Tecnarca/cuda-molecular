@@ -13,6 +13,7 @@
 #endif
 #include <cuda_kerns.h>
 #include <stdio.h>
+#include <chrono>
 
 texture<float, 1, cudaReadModeElementType> texScore_pos;
 texture<int, 1, cudaReadModeElementType> texMask;
@@ -109,12 +110,22 @@ __global__ void rotate(float* in, int* mask, int iter, float precision, int* sta
 	/*The line IS NOT correct! causes a memory error, detectable only by calling
 	cudaMemoryTest() before the call of rotate. Not even cuda-memcheck catched it! We revert temporarly to standard non-texturized array...*/
 	const int mask_x = mask[x+iter*N_ATOMS];/*tex1Dfetch(texMask, x+iter*N_ATOMS);*/
-		
+
+	in[x+offset]=in_s[x];
+	in[y+offset]=in_s[y];
+	in[z+offset]=in_s[z];	
+	__syncthreads();
+
 	if(mask_x == 1){ //can this if can be removed for better performance warp-level? Is it better doing so? (i suppose no)
 		in[x+offset] = m[0] * in_s[x] + m[1] * in_s[y] + m[2] * in_s[z] + m[3];
 		in[y+offset] = m[4] * in_s[x] + m[5] * in_s[y] + m[6] * in_s[z] + m[7];
 		in[z+offset] = m[8] * in_s[x] + m[9] * in_s[y] + m[10] * in_s[z] + m[11];
 	}
+
+	/*if(index==184){
+		printf("%f %f %f\n", in[x+offset],in[x+offset],in[x+offset]);
+	}*/
+
 }
 
 __global__ void measure_shotgun (float* in, float* scores, int* shotgun, float precision, int iter){
@@ -241,11 +252,17 @@ __inline__ __device__ int find_best(int* shotgun, int* bumping, int index){
 __global__ void eval_angles(float* in, int* shotgun, int* bumping){
 	
 	__shared__ int best_angle;
+
 	const int index = threadIdx.x;
+
+	//printf("(%d: %f, %d, %d)\n", index, in[index], shotgun[index], bumping[index]);
 
 	int best_index = find_best(shotgun, bumping, index);
 
-	if(index == 0) best_angle = best_index;
+	if(index == 0) {
+		//printf("best: (%d: %f, %d, %d)\n", best_index, in[index], shotgun[index], bumping[index]);
+		best_angle = best_index;
+	}
 	
 	__syncthreads();
 
@@ -380,46 +397,53 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 
 	cudaEventRecord(start_t);
 
-	for(int i=0; i<N_ATOMS*3; i++){
+	/*for(int i=0; i<N_ATOMS*3; i++){
 		printf("%f ", in[i]);
-	}
+	}*/
 
-	for (int i=3;i<N_FRAGS;++i){
+	/*cudaMemoryTest() calls and the function itself can be removed in the future, when we solved all the errors*/
+	for (int i=0;i<N_FRAGS-3;++i){
 
 		rotate<<<ceil(MAX_ANGLE/precision),N_ATOMS,0,s1>>>(d_in, d_mask, i, precision, d_start, d_stop);
 		cudaMemoryTest();
+
 		cudaStreamSynchronize(s1);
 		cudaStreamSynchronize(s2);
 
 		fragment_is_bumping<<<bump_blocks,N_ATOMS,0,s1>>>(d_in, d_mask, d_bumping_partial, i, precision);
-
+		cudaMemoryTest();
+		
 		measure_shotgun<<<ceil(MAX_ANGLE/precision),N_ATOMS,0,s2>>>(d_in, d_score_pos, d_shotgun, precision, i);
-
+		cudaMemoryTest();
+		
 		fragment_reduce<<<ceil(MAX_ANGLE/precision),N_ATOMS,0,s1>>>(d_bumping, d_bumping_partial);
-
+		cudaMemoryTest();
+		
 		cudaStreamSynchronize(s1);
 		cudaStreamSynchronize(s2);
 
 		eval_angles<<<1,ceil(MAX_ANGLE/precision),0,s1>>>(d_in, d_shotgun, d_bumping);
+		cudaMemoryTest();
 	}
 
-	cudaStreamSynchronize(s1);
-	cudaStreamSynchronize(s2);
+	cudaDeviceSynchronize();
 
 	cudaEventSynchronize(stop_t);
 
 	float milliseconds = 0;
-	//Se chiamo questa funzione restituisce un errore cuda-memcheck. Dafaq?
+	//Se chiamo la funzione qui sotto restituisce un errore cuda-memcheck: 
+	//Program hit cudaErrorInvalidResourceHandle (error 400) due to "invalid resource handle" on CUDA API call to cudaEventElapsedTime.
+	//Wtf? Forse è colpa degli stream?
 	//cudaEventElapsedTime(&milliseconds, start_t, stop_t);
+	printf("\nKernels executed in %f milliseconds\n", milliseconds);
 
 	status_wb = cudaMemcpy(out, d_in, sizeof(float)*INSIZE, cudaMemcpyDeviceToHost);
 	if(DEBUG && status_wb!=cudaSuccess)
 		printf("%s in %s at line %d\n", cudaGetErrorString(status_wb), __FILE__, __LINE__);
-	printf("\nKernels executed in %f milliseconds\n", milliseconds);
 
-	for(int i=0; i<N_ATOMS*3; i++){
+	/*for(int i=0; i<N_ATOMS*3; i++){
 		printf("%f ", out[i]);
-	}
+	}*/
 
 	cudaDestroyTextureObject(texScore_pos);
 	cudaDestroyTextureObject(texMask);
