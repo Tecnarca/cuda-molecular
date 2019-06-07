@@ -201,15 +201,16 @@ __inline__ __device__ void warpMaxRedux(int &shot, int &bum, int &index){
 	int bumM = bum;
 	int indexM = index;
 	for (int i = warpSize/2; i > 0; i/=2){
-		shotM = __shfl_sync(0xffffffff, shotM, i, 32);
-		bumM = __shfl_sync(0xffffffff, bumM, i, 32);
-		indexM = __shfl_sync(0xffffffff, indexM, i, 32);
-		if(bumM<bum || (bum == bumM && shotM<=shot)){
+		shotM = __shfl_down_sync(0xffffffff, shotM, i, 32);
+		bumM = __shfl_down_sync(0xffffffff, bumM, i, 32);
+		indexM = __shfl_down_sync(0xffffffff, indexM, i, 32);
+		if(bumM>bum || (bum == bumM && shotM<=shot)){
 			shotM = shot;
 			bumM = bum;
 			indexM = index;
 		}
 	}
+	//printf("%d\n", indexM);
 	index = indexM;
 	bum = bumM;
 	shot = shotM;
@@ -228,6 +229,7 @@ __inline__ __device__ int find_best(int* shotgun, int* bumping, int index){
 	static __shared__ int sharedS[32];
 	static __shared__ int sharedB[32];
 
+	// to be checked
 	warpMaxRedux(shotM, bumM, indexM);
 
 	if(lane==0){
