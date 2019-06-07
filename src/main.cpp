@@ -183,7 +183,7 @@ int main(int argc, char **argv)
  * the function will have to evaluate data structures of 64 "atoms", that are the array (input data) and array2 (output data). 1 is the angle, volumeData is the value of the space for scoring, the start/stop arrays contains the position of the "atoms" used to initialize the rotation, and mask contains a bitmask that shows if an "atom" has to be rotated (1) or not (0). It also contains a 10 value that is the "start" atom.
  * functional details can be found inside the ps_check function, in ../include/check_kerns.h
  */
-ps_kern(array,array2,1.0,volumeData,start,stop,mask,4);
+ps_kern(array,array2,1.0,volumeData,start,stop,mask);
 
 
 
