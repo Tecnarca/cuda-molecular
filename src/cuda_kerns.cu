@@ -130,6 +130,7 @@ __global__ void rotate(float* in, int* mask, int iter, float precision, int* sta
 
 __global__ void measure_shotgun (float* in, float* scores, int* shotgun, float precision, int iter){
 	const int index = blockIdx.x;
+	const int writers = threadIdx.x;
 	const int x = threadIdx.x + index*INSIZE;
 	const int y = threadIdx.x + index*INSIZE + N_ATOMS;
 	const int z = threadIdx.x + index*INSIZE + 2*N_ATOMS;
@@ -152,7 +153,7 @@ __global__ void measure_shotgun (float* in, float* scores, int* shotgun, float p
 	int score = scores[index_x+100*index_y+10000*index_z];/*tex1Dfetch(texScore_pos, index_x+100*index_y+10000*index_z);*/
 
 	int reduced = blockReduce(score);
-	if(!x) shotgun[index] = reduced;
+	if(!writers) shotgun[index] = reduced;
 }
 
 __global__ void fragment_is_bumping(float* in, int* mask, int* is_bumping_p, int iter, float precision){
