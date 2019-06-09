@@ -198,7 +198,7 @@ __global__ void fragment_reduce(int* is_bumping, int* is_bumping_p){
 }
 
 
-__inline__ __device__ int warpReduce(int ind, int sho, int bum, int &ret1, int &ret2, int &ret3) {
+__inline__ __device__ void warpReduce(int ind, int sho, int bum, int &ret1, int &ret2, int &ret3) {
 	int im, sm, bm;
 	for (int i = warpSize/2; i > 0; i/=2){
 		im = __shfl_down_sync(0xffffffff, ind, i, 32);
@@ -262,7 +262,7 @@ __global__ void eval_angles(float* in, int* shotgun, int* bumping){
 	int best_index = find_best(shotgun, bumping, index);
 
 	if(index == 0) {
-		printf("best: (%d: %f, %d, %d)\n", best_index, in[index], shotgun[index], bumping[index]);
+		printf("best: (%d: %f, %d, %d)\n", best_index, in[best_index*INSIZE], shotgun[best_index], bumping[best_index]);
 		best_angle = best_index;
 	}
 	
@@ -404,7 +404,7 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	}*/
 
 	/*cudaMemoryTest() calls and the function itself can be removed in the future, when we solved all the errors*/
-	for (int i=0;i<N_FRAGS-3;++i){
+	for (int i=0;i<N_FRAGS;++i){
 
 		rotate<<<ceil(MAX_ANGLE/precision),N_ATOMS,0,s1>>>(d_in, d_mask, i, precision, d_start, d_stop);
 		cudaMemoryTest();
