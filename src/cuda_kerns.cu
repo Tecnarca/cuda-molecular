@@ -418,13 +418,13 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 
 	cudaDeviceSynchronize();
 
-	cudaEventSynchronize(stop_t);
+	cudaEventRecord(stop_t);
 
 	float milliseconds = 0;
 	//Se chiamo la funzione qui sotto restituisce un errore cuda-memcheck: 
 	//Program hit cudaErrorInvalidResourceHandle (error 400) due to "invalid resource handle" on CUDA API call to cudaEventElapsedTime.
 	//Wtf? Forse è colpa degli stream?
-	//cudaEventElapsedTime(&milliseconds, start_t, stop_t);
+	cudaEventElapsedTime(&milliseconds, start_t, stop_t);
 	printf("\nKernels executed in %f milliseconds\n", milliseconds);
 
 	status_wb = cudaMemcpy(out, d_in, sizeof(float)*INSIZE, cudaMemcpyDeviceToHost);
