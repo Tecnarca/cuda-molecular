@@ -194,7 +194,7 @@ __global__ void fragment_reduce(int* is_bumping, int* is_bumping_p){
 	int x = threadIdx.x;
 	int val_bit = is_bumping_p[x+index*N_ATOMS];
 	int reduced = blockReduce(val_bit);
-	is_bumping[index] = (reduced)?1:0;
+	if(!x) is_bumping[index] = (reduced)?1:0;
 }
 
 __inline__ __device__ void warpMaxRedux(int &shot, int &bum, int &index){
