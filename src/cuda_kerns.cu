@@ -197,63 +197,58 @@ __global__ void fragment_reduce(int* is_bumping, int* is_bumping_p){
 	if(!x) is_bumping[index] = (reduced)?1:0;
 }
 
-__inline__ __device__ void warpMaxRedux(int &shotM, int &bumM, int &indexM, int shot, int bum, int index){
+
+__inline__ __device__ int warpReduce(int ind, int sho, int bum, int &ret1, int &ret2, int &ret3) {
+	int im, sm, bm;
 	for (int i = warpSize/2; i > 0; i/=2){
-		shotM = __shfl_down_sync(0xffffffff, shotM, i, 32);
-		bumM = __shfl_down_sync(0xffffffff, bumM, i, 32);
-		indexM = __shfl_down_sync(0xffffffff, indexM, i, 32);
-		if(bumM>bum || (bum == bumM && shotM<=shot)){
-			shotM = shot;
-			bumM = bum;
-			indexM = index;
+		im = __shfl_down_sync(0xffffffff, ind, i, 32);
+		sm = __shfl_down_sync(0xffffffff, sho, i, 32);
+		bm = __shfl_down_sync(0xffffffff, bum, i, 32);
+		if(!(bm > bum || (bum==bm && sho>=sm))){
+			ind = im;
+			sho = sm;
+			bum = bm;
 		}
-		__syncthreads();
 	}
+	ret1=ind;	
+	ret2=sho;
+	ret3=bum;
 }
+
 __inline__ __device__ int find_best(int* shotgun, int* bumping, int index){
 	int shot = shotgun[index];
 	int bum = bumping[index];
-	int shotM = shot;
-	int bumM = bum;
-	int indexM = index;
-	int lane = threadIdx.x % warpSize;
-	int wid = threadIdx.x / warpSize;
-
+	int ind = index;
 	static __shared__ int sharedI[32];
 	static __shared__ int sharedS[32];
 	static __shared__ int sharedB[32];
 
-	// to be checked
-	warpMaxRedux(shotM, bumM, indexM, shot, bum, index);
+	int lane = index % warpSize;
+	int wid = index / warpSize;
 
-	if(lane==0){
-		sharedI[wid]=indexM;
-		sharedB[wid]=bumM;
-		sharedS[wid]=shotM;
+	warpReduce(index, shot, bum, ind, shot, bum);
+
+	if (lane==0){
+		sharedI[wid]=ind;
+		sharedS[wid]=shot;
+		sharedB[wid]=bum;
 	}
-
+	
 	__syncthreads();
 
 	if(index < blockDim.x / warpSize){
-		indexM = sharedI[lane];
-		bumM = sharedB[lane];
-		shotM = sharedS[lane];
-		index = indexM;
-		bum = bumM;
-		shot = shotM;
+		ind = sharedI[lane];
+		bum = sharedB[lane];
+		shot = sharedS[lane];
 	} else {
-		indexM = 0;
-		bumM = 1;
-		shotM = 0;
-		index = 0;
+		ind = 0;
 		bum = 1;
 		shot = 0;
 	}
-
-	//this line provokes siegfault!
-	//if (wid==0) warpMaxRedux(shotM, bumM, indexM, shot, bum, index);
 	
-	return indexM;
+	if (wid==0) warpReduce(ind, shot, bum, ind, shot, bum);
+	
+	return ind;
 }
 
 __global__ void eval_angles(float* in, int* shotgun, int* bumping){
