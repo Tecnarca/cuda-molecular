@@ -197,10 +197,7 @@ __global__ void fragment_reduce(int* is_bumping, int* is_bumping_p){
 	if(!x) is_bumping[index] = (reduced)?1:0;
 }
 
-__inline__ __device__ void warpMaxRedux(int &shot, int &bum, int &index){
-	int shotM = shot;
-	int bumM = bum;
-	int indexM = index;
+__inline__ __device__ void warpMaxRedux(int &shotM, int &bumM, int &indexM, int shot, int bum, int index){
 	for (int i = warpSize/2; i > 0; i/=2){
 		shotM = __shfl_down_sync(0xffffffff, shotM, i, 32);
 		bumM = __shfl_down_sync(0xffffffff, bumM, i, 32);
@@ -210,13 +207,9 @@ __inline__ __device__ void warpMaxRedux(int &shot, int &bum, int &index){
 			bumM = bum;
 			indexM = index;
 		}
+		__syncthreads();
 	}
-	//printf("%d\n", indexM);
-	index = indexM;
-	bum = bumM;
-	shot = shotM;
 }
-
 __inline__ __device__ int find_best(int* shotgun, int* bumping, int index){
 	int shot = shotgun[index];
 	int bum = bumping[index];
@@ -231,7 +224,7 @@ __inline__ __device__ int find_best(int* shotgun, int* bumping, int index){
 	static __shared__ int sharedB[32];
 
 	// to be checked
-	warpMaxRedux(shotM, bumM, indexM);
+	warpMaxRedux(shotM, bumM, indexM, shot, bum, index);
 
 	if(lane==0){
 		sharedI[wid]=indexM;
@@ -245,9 +238,20 @@ __inline__ __device__ int find_best(int* shotgun, int* bumping, int index){
 		indexM = sharedI[lane];
 		bumM = sharedB[lane];
 		shotM = sharedS[lane];
+		index = indexM;
+		bum = bumM;
+		shot = shotM;
+	} else {
+		indexM = 0;
+		bumM = 1;
+		shotM = 0;
+		index = 0;
+		bum = 1;
+		shot = 0;
 	}
-	
-	if (wid==0) warpMaxRedux(shotM, bumM, indexM);
+
+	//this line provokes siegfault!
+	//if (wid==0) warpMaxRedux(shotM, bumM, indexM, shot, bum, index);
 	
 	return indexM;
 }
@@ -263,7 +267,7 @@ __global__ void eval_angles(float* in, int* shotgun, int* bumping){
 	int best_index = find_best(shotgun, bumping, index);
 
 	if(index == 0) {
-		//printf("best: (%d: %f, %d, %d)\n", best_index, in[index], shotgun[index], bumping[index]);
+		printf("best: (%d: %f, %d, %d)\n", best_index, in[index], shotgun[index], bumping[index]);
 		best_angle = best_index;
 	}
 	
@@ -337,7 +341,7 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	if(DEBUG && status!=cudaSuccess)
 		printf("%s in %s at line %d\n", cudaGetErrorString(status), __FILE__, __LINE__);
 
-	status = cudaMalloc((void**)&d_bumping_partial, sizeof(int)*ceil(MAX_ANGLE/precision)*ceil(MAX_ANGLE/precision));
+	status = cudaMalloc((void**)&d_bumping_partial, sizeof(int)*ceil(MAX_ANGLE/precision)*N_ATOMS);
 	if(DEBUG && status!=cudaSuccess)
 		printf("%s in %s at line %d\n", cudaGetErrorString(status), __FILE__, __LINE__);
 
