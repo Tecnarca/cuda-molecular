@@ -1,8 +1,8 @@
 #ifndef DEBUG
-#define INSIZE 256 //dimension of 'in'. Used items: 192 (64*3)
+#define DEBUG 1
+#define INSIZE 256 //dimension of 'in'
 #define N_ATOMS 64 //atoms inside 'in'
 #define N_FRAGS 4 //number of fragments
-#define DEBUG 1 //should we execute the debug prints and checks?
 #define MASKSIZE 256 //dimension of the 'mask'
 #define VOLUMESIZE 1000000 //dimension of 'score_pos'
 #define MAX_ANGLE 256 //up to which angle we need to run the algorithm?
@@ -13,7 +13,6 @@
 #endif
 #include <cuda_kerns.h>
 #include <stdio.h>
-#include <chrono>
 
 texture<float, 1, cudaReadModeElementType> texScore_pos;
 texture<int, 1, cudaReadModeElementType> texMask;
@@ -91,9 +90,6 @@ __global__ void rotate(float* in, int* mask, int iter, float precision, int* sta
 	const int y = threadIdx.x + N_ATOMS;
 	const int z = threadIdx.x + 2*N_ATOMS;
 	const int offset = ceil(index*INSIZE/precision);
-
-	//This can be shared and computed only once per iter instance of rotate<<<,>>>() instead that once per thread!
-	//but how to do it efficently? Shared memory? Then, how do i initialize it?
 	float m[12];
 
 	__shared__ float in_s[N_ATOMS*3];
@@ -106,10 +102,9 @@ __global__ void rotate(float* in, int* mask, int iter, float precision, int* sta
 
 	compute_matrix(index*precision,in_s[curr_start],in_s[curr_start+N_ATOMS],in_s[curr_start+2*N_ATOMS],in_s[curr_stop],in_s[curr_stop+N_ATOMS], in_s[curr_stop+2*N_ATOMS], m);
 
-	//is this line correct? Can we optimize this access with a 2D texture of dimension (64,4)? (probably no)
 	/*The line IS NOT correct! causes a memory error, detectable only by calling
 	cudaMemoryTest() before the call of rotate. Not even cuda-memcheck catched it! We revert temporarly to standard non-texturized array...*/
-	const int mask_x = mask[x+iter*N_ATOMS];/*tex1Dfetch(texMask, x+iter*N_ATOMS);*/
+	const int mask_x = mask[x+iter*N_ATOMS];//tex1Dfetch(texMask, x+iter*N_ATOMS);
 
 	if(mask_x == 1){
 		in[x+offset] = m[0] * in_s[x] + m[1] * in_s[y] + m[2] * in_s[z] + m[3];
@@ -419,7 +414,7 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	cudaDeviceSynchronize();
 
 	cudaEventRecord(stop_t);
-
+	cudaEventSynchronize(stop_t);
 	float milliseconds = 0;
 	//Se chiamo la funzione qui sotto restituisce un errore cuda-memcheck: 
 	//Program hit cudaErrorInvalidResourceHandle (error 400) due to "invalid resource handle" on CUDA API call to cudaEventElapsedTime.
