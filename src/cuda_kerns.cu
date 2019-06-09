@@ -81,7 +81,7 @@ __device__ void compute_matrix( const int rotation_angle,
 	matrix[11]=	((z_orig * (u2 + v2) - w * (x_orig * u + y_orig * v)) * one_minus_cost + (x_orig * v - y_orig * u) * l * sint) / l2;
 }
 
-__global__ void rotate(float* in, int* mask, int iter, float precision, int* start, int* stop){
+__global__ void rotate(float* in, cudaTextureObject_t mask, int iter, float precision, int* start, int* stop){
 	
 	const int index = blockIdx.x;
 	const int curr_start = start[iter];
@@ -104,7 +104,7 @@ __global__ void rotate(float* in, int* mask, int iter, float precision, int* sta
 
 	/*The line IS NOT correct! causes a memory error, detectable only by calling
 	cudaMemoryTest() before the call of rotate. Not even cuda-memcheck catched it! We revert temporarly to standard non-texturized array...*/
-	const int mask_x = mask[x+iter*N_ATOMS];//tex1Dfetch(texMask, x+iter*N_ATOMS);
+	const int mask_x = /*mask[x+iter*N_ATOMS];*/tex1Dfetch(mask, x+iter*N_ATOMS);
 
 	if(mask_x == 1){
 		in[x+offset] = m[0] * in_s[x] + m[1] * in_s[y] + m[2] * in_s[z] + m[3];
@@ -117,7 +117,7 @@ __global__ void rotate(float* in, int* mask, int iter, float precision, int* sta
 	}
 }
 
-__global__ void measure_shotgun (float* in, float* scores, int* shotgun, float precision, int iter){
+__global__ void measure_shotgun (float* in, cudaTextureObject_t scores, int* shotgun, float precision, int iter){
 	const int index = blockIdx.x;
 	const int writers = threadIdx.x;
 	const int x = threadIdx.x + index*INSIZE;
@@ -139,13 +139,13 @@ __global__ void measure_shotgun (float* in, float* scores, int* shotgun, float p
 	if (index_z > 100) index_z = 100;
 
 	//Is this line correct? Can we optimize this access pattern with a 3D texture of dimension (100,100,100)? (probably yes)
-	int score = scores[index_x+100*index_y+10000*index_z];/*tex1Dfetch(texScore_pos, index_x+100*index_y+10000*index_z);*/
+	int score = /*scores[index_x+100*index_y+10000*index_z];*/tex1Dfetch(scores, index_x+100*index_y+10000*index_z);
 
 	int reduced = blockReduce(score);
 	if(!writers) shotgun[index] = reduced;
 }
 
-__global__ void fragment_is_bumping(float* in, int* mask, int* is_bumping_p, int iter, float precision){
+__global__ void fragment_is_bumping(float* in, cudaTextureObject_t mask, int* is_bumping_p, int iter, float precision){
 	const int index = blockIdx.y;
 	int ix = threadIdx.x;
 	int jx = blockIdx.x;
@@ -169,8 +169,8 @@ __global__ void fragment_is_bumping(float* in, int* mask, int* is_bumping_p, int
 	const float distance2 = diff_x * diff_x +  diff_y * diff_y +  diff_z * diff_z;
 
 	//Are these lines correct?
-	int m_ix = mask[ix+iter*N_ATOMS];/*tex1Dfetch(texMask, ix+iter*N_ATOMS);*/
-	int m_jx = mask[jx+iter*N_ATOMS];/*tex1Dfetch(texMask, xx+iter*N_ATOMS);*/
+	int m_ix = /*mask[ix+iter*N_ATOMS];*/tex1Dfetch(mask, ix+iter*N_ATOMS);
+	int m_jx = /*mask[jx+iter*N_ATOMS];*/tex1Dfetch(mask, xx+iter*N_ATOMS);
 
 	int val_bit = (fabsf(m_ix - m_jx) == 1 && jx>ix && distance2 < LIMIT_DISTANCE2)? 1:0;
 
@@ -248,6 +248,7 @@ __global__ void eval_angles(float* in, int* shotgun, int* bumping){
 
 	int best_index = find_best(shotgun, bumping, index);
 
+	//could it be that everyone already has the best angle? If yes, this is useless
 	if(index == 0) {
 		//printf("best: (%d: %f, %d, %d)\n", best_index, in[best_index*INSIZE], shotgun[best_index], bumping[best_index]);
 		best_angle = best_index;
