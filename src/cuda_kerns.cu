@@ -111,21 +111,15 @@ __global__ void rotate(float* in, int* mask, int iter, float precision, int* sta
 	cudaMemoryTest() before the call of rotate. Not even cuda-memcheck catched it! We revert temporarly to standard non-texturized array...*/
 	const int mask_x = mask[x+iter*N_ATOMS];/*tex1Dfetch(texMask, x+iter*N_ATOMS);*/
 
-	in[x+offset]=in_s[x];
-	in[y+offset]=in_s[y];
-	in[z+offset]=in_s[z];	
-	__syncthreads();
-
-	if(mask_x == 1){ //can this if can be removed for better performance warp-level? Is it better doing so? (i suppose no)
+	if(mask_x == 1){
 		in[x+offset] = m[0] * in_s[x] + m[1] * in_s[y] + m[2] * in_s[z] + m[3];
 		in[y+offset] = m[4] * in_s[x] + m[5] * in_s[y] + m[6] * in_s[z] + m[7];
 		in[z+offset] = m[8] * in_s[x] + m[9] * in_s[y] + m[10] * in_s[z] + m[11];
+	} else {
+		in[x+offset]=in_s[x];
+		in[y+offset]=in_s[y];
+		in[z+offset]=in_s[z];		
 	}
-
-	/*if(index==184){
-		printf("%f %f %f\n", in[x+offset],in[x+offset],in[x+offset]);
-	}*/
-
 }
 
 __global__ void measure_shotgun (float* in, float* scores, int* shotgun, float precision, int iter){
@@ -194,7 +188,7 @@ __global__ void fragment_reduce(int* is_bumping, int* is_bumping_p){
 	int x = threadIdx.x;
 	int val_bit = is_bumping_p[x+index*N_ATOMS];
 	int reduced = blockReduce(val_bit);
-	if(!x) is_bumping[index] = (reduced)?1:0;
+	if(!x) is_bumping[index] = (reduced)? 1:0;
 }
 
 
@@ -257,12 +251,10 @@ __global__ void eval_angles(float* in, int* shotgun, int* bumping){
 
 	const int index = threadIdx.x;
 
-	//printf("(%d: %f, %d, %d)\n", index, in[index], shotgun[index], bumping[index]);
-
 	int best_index = find_best(shotgun, bumping, index);
 
 	if(index == 0) {
-		printf("best: (%d: %f, %d, %d)\n", best_index, in[best_index*INSIZE], shotgun[best_index], bumping[best_index]);
+		//printf("best: (%d: %f, %d, %d)\n", best_index, in[best_index*INSIZE], shotgun[best_index], bumping[best_index]);
 		best_angle = best_index;
 	}
 	
@@ -399,10 +391,6 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 
 	cudaEventRecord(start_t);
 
-	/*for(int i=0; i<N_ATOMS*3; i++){
-		printf("%f ", in[i]);
-	}*/
-
 	/*cudaMemoryTest() calls and the function itself can be removed in the future, when we solved all the errors*/
 	for (int i=0;i<N_FRAGS;++i){
 
@@ -442,10 +430,6 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	status_wb = cudaMemcpy(out, d_in, sizeof(float)*INSIZE, cudaMemcpyDeviceToHost);
 	if(DEBUG && status_wb!=cudaSuccess)
 		printf("%s in %s at line %d\n", cudaGetErrorString(status_wb), __FILE__, __LINE__);
-
-	/*for(int i=0; i<N_ATOMS*3; i++){
-		printf("%f ", out[i]);
-	}*/
 
 	cudaDestroyTextureObject(texScore_pos);
 	cudaDestroyTextureObject(texMask);
