@@ -189,7 +189,7 @@ ps_kern(array,array2,1.0,volumeData,start,stop,mask);
 
 
 //check func
-ps_check<64,1>(arraycheck,array2check,1,volumeData,start,stop,mask);
+ps_check<64,4>(arraycheck,array2check,1,volumeData,start,stop,mask);
 
 	for (int k=0; k<3; k++)
 {
