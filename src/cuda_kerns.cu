@@ -102,9 +102,7 @@ __global__ void rotate(float* in, cudaTextureObject_t mask, int iter, float prec
 
 	compute_matrix(index*precision,in_s[curr_start],in_s[curr_start+N_ATOMS],in_s[curr_start+2*N_ATOMS],in_s[curr_stop],in_s[curr_stop+N_ATOMS], in_s[curr_stop+2*N_ATOMS], m);
 
-	/*The line IS NOT correct! causes a memory error, detectable only by calling
-	cudaMemoryTest() before the call of rotate. Not even cuda-memcheck catched it! We revert temporarly to standard non-texturized array...*/
-	const int mask_x = /*mask[x+iter*N_ATOMS];*/tex1Dfetch<int>(mask, x+iter*N_ATOMS);
+	const int mask_x = tex1Dfetch<int>(mask, x+iter*N_ATOMS);
 
 	if(mask_x == 1){
 		in[x+offset] = m[0] * in_s[x] + m[1] * in_s[y] + m[2] * in_s[z] + m[3];
@@ -138,8 +136,7 @@ __global__ void measure_shotgun (float* in, cudaTextureObject_t scores, int* sho
 	if (index_z < 0) index_z = 0;
 	if (index_z > 100) index_z = 100;
 
-	//Is this line correct? Can we optimize this access pattern with a 3D texture of dimension (100,100,100)? (probably yes)
-	int score = (int) /*scores[index_x+100*index_y+10000*index_z];*/tex1Dfetch<float>(scores, index_x+100*index_y+10000*index_z);
+	int score = (int) tex1Dfetch<float>(scores, index_x+100*index_y+10000*index_z);
 
 	int reduced = blockReduce(score);
 	if(!writers) shotgun[index] = reduced;
@@ -168,9 +165,8 @@ __global__ void fragment_is_bumping(float* in, cudaTextureObject_t mask, int* is
 	const float diff_z = in_s[iz] - in_s[jz];
 	const float distance2 = diff_x * diff_x +  diff_y * diff_y +  diff_z * diff_z;
 
-	//Are these lines correct?
-	int m_ix = /*mask[ix+iter*N_ATOMS];*/tex1Dfetch<int>(mask, ix+iter*N_ATOMS);
-	int m_jx = /*mask[jx+iter*N_ATOMS];*/tex1Dfetch<int>(mask, jx+iter*N_ATOMS);
+	int m_ix = tex1Dfetch<int>(mask, ix+iter*N_ATOMS);
+	int m_jx = tex1Dfetch<int>(mask, jx+iter*N_ATOMS);
 
 	int val_bit = (fabsf(m_ix - m_jx) == 1 && jx>ix && distance2 < LIMIT_DISTANCE2)? 1:0;
 
@@ -249,39 +245,12 @@ __global__ void eval_angles(float* in, int* shotgun, int* bumping){
 	int best_index = find_best(shotgun, bumping, index);
 
 	//could it be that everyone already has the best angle? If yes, this is useless
-	if(index == 0) {
-		//printf("best: (%d: %f, %d, %d)\n", best_index, in[best_index*INSIZE], shotgun[best_index], bumping[best_index]);
-		best_angle = best_index;
-	}
+	if(index == 0) best_angle = best_index;
 	
 	__syncthreads();
 
-	//this line works assuming INSIZE<=MAX_ANGLE/precision. How do we remove this assumption? (probably need a for to copy multiple values)
+	//this line works assuming INSIZE<=MAX_ANGLE/precision. How do we remove this assumption?
 	if(index < INSIZE) in[index] = in[best_angle*INSIZE+index];
-}
-
-
-#define cudaSafeCall(call)  \
-        do {\
-            cudaError_t err = call;\
-            if (cudaSuccess != err) \
-            {\
-                printf("CUDA error in %s(%s): %s",__FILE__,__LINE__,cudaGetErrorString(err));\
-                exit(EXIT_FAILURE);\
-            }\
-        } while(0)
-
-void cudaMemoryTest()
-{
-    const unsigned int N = 1048576;
-    const unsigned int bytes = N * sizeof(int);
-    int *h_a = (int*)malloc(bytes);
-    int *d_a;
-    cudaSafeCall(cudaMalloc((int**)&d_a, bytes));
-
-    memset(h_a, 0, bytes);
-    cudaSafeCall(cudaMemcpy(d_a, h_a, bytes, cudaMemcpyHostToDevice));
-    cudaSafeCall(cudaMemcpy(h_a, d_a, bytes, cudaMemcpyDeviceToHost));
 }
 
 void ps_kern(float* in, float* out, float precision, float* score_pos, int* start, int* stop, int* mask)
@@ -387,29 +356,23 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 
 	cudaEventRecord(start_t);
 
-	/*cudaMemoryTest() calls and the function itself can be removed in the future, when we solved all the errors*/
 	for (int i=0;i<N_FRAGS;++i){
 
 		rotate<<<ceil(MAX_ANGLE/precision),N_ATOMS,0,s1>>>(d_in, texMask, i, precision, d_start, d_stop);
-		//cudaMemoryTest();
 
 		cudaStreamSynchronize(s1);
 		cudaStreamSynchronize(s2);
 
 		fragment_is_bumping<<<bump_blocks,N_ATOMS,0,s1>>>(d_in, texMask, d_bumping_partial, i, precision);
-		//cudaMemoryTest();
 		
 		measure_shotgun<<<ceil(MAX_ANGLE/precision),N_ATOMS,0,s2>>>(d_in, texScore_pos, d_shotgun, precision, i);
-		//cudaMemoryTest();
 		
 		fragment_reduce<<<ceil(MAX_ANGLE/precision),N_ATOMS,0,s1>>>(d_bumping, d_bumping_partial);
-		//cudaMemoryTest();
 		
 		cudaStreamSynchronize(s1);
 		cudaStreamSynchronize(s2);
 
 		eval_angles<<<1,ceil(MAX_ANGLE/precision),0,s1>>>(d_in, d_shotgun, d_bumping);
-		//cudaMemoryTest();
 	}
 
 	cudaDeviceSynchronize();
@@ -417,9 +380,6 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	cudaEventRecord(stop_t);
 	cudaEventSynchronize(stop_t);
 	float milliseconds = 0;
-	//Se chiamo la funzione qui sotto restituisce un errore cuda-memcheck: 
-	//Program hit cudaErrorInvalidResourceHandle (error 400) due to "invalid resource handle" on CUDA API call to cudaEventElapsedTime.
-	//Wtf? Forse è colpa degli stream?
 	cudaEventElapsedTime(&milliseconds, start_t, stop_t);
 	printf("\nKernels executed in %f milliseconds\n", milliseconds);
 
