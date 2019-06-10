@@ -139,7 +139,7 @@ __global__ void measure_shotgun (float* in, cudaTextureObject_t scores, int* sho
 	if (index_z > 100) index_z = 100;
 
 	//Is this line correct? Can we optimize this access pattern with a 3D texture of dimension (100,100,100)? (probably yes)
-	int score = /*scores[index_x+100*index_y+10000*index_z];*/tex1Dfetch<int>(scores, index_x+100*index_y+10000*index_z);
+	int score = (int) /*scores[index_x+100*index_y+10000*index_z];*/tex1Dfetch<float>(scores, index_x+100*index_y+10000*index_z);
 
 	int reduced = blockReduce(score);
 	if(!writers) shotgun[index] = reduced;
@@ -391,25 +391,25 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	for (int i=0;i<N_FRAGS;++i){
 
 		rotate<<<ceil(MAX_ANGLE/precision),N_ATOMS,0,s1>>>(d_in, texMask, i, precision, d_start, d_stop);
-		cudaMemoryTest();
+		//cudaMemoryTest();
 
 		cudaStreamSynchronize(s1);
 		cudaStreamSynchronize(s2);
 
 		fragment_is_bumping<<<bump_blocks,N_ATOMS,0,s1>>>(d_in, texMask, d_bumping_partial, i, precision);
-		cudaMemoryTest();
+		//cudaMemoryTest();
 		
 		measure_shotgun<<<ceil(MAX_ANGLE/precision),N_ATOMS,0,s2>>>(d_in, texScore_pos, d_shotgun, precision, i);
-		cudaMemoryTest();
+		//cudaMemoryTest();
 		
 		fragment_reduce<<<ceil(MAX_ANGLE/precision),N_ATOMS,0,s1>>>(d_bumping, d_bumping_partial);
-		cudaMemoryTest();
+		//cudaMemoryTest();
 		
 		cudaStreamSynchronize(s1);
 		cudaStreamSynchronize(s2);
 
 		eval_angles<<<1,ceil(MAX_ANGLE/precision),0,s1>>>(d_in, d_shotgun, d_bumping);
-		cudaMemoryTest();
+		//cudaMemoryTest();
 	}
 
 	cudaDeviceSynchronize();
