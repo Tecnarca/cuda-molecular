@@ -385,6 +385,7 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 
 	cudaEventRecord(start_t);
 
+	//for each fragment
 	for (int i=0;i<N_FRAGS;++i){
 
 		//For each angle (MAX_ANGLE/precision) rotates each atom (N_ATOMS)
@@ -392,24 +393,30 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 
 		cudaStreamSynchronize(s1);
 
+		//For each angle, evaluates all the pairs 
 		fragment_is_bumping<<<bump_blocks,N_ATOMS,0,s1>>>(d_in, texMask, d_bumping_partial, i, precision, d_bumping);
 		
+		//For each angle (this for each rotated in[]) computes the shotgun of each atom
 		measure_shotgun<<<ceil(MAX_ANGLE/precision),N_ATOMS,0,s2>>>(d_in, texScore_pos, d_shotgun, precision, i);
-			
+		
+		//To reassure that we have computed everything
 		cudaStreamSynchronize(s1);
 		cudaStreamSynchronize(s2);
 
+		//For each angle, find the best in[] and write it back in the first position
 		eval_angles<<<1,ceil(MAX_ANGLE/precision),0,s1>>>(d_in, d_shotgun, d_bumping);
 	}
 
 	cudaStreamSynchronize(s1);
 
+	//Timing result
 	cudaEventRecord(stop_t);
 	cudaEventSynchronize(stop_t);
 	float milliseconds = 0;
 	cudaEventElapsedTime(&milliseconds, start_t, stop_t);
 	printf("\nKernels executed in %f milliseconds\n", milliseconds);
 
+	//Write back the rotated in
 	status_wb = cudaMemcpy(out, d_in, sizeof(float)*INSIZE, cudaMemcpyDeviceToHost);
 	if(DEBUG && status_wb!=cudaSuccess)
 		printf("%s in %s at line %d\n", cudaGetErrorString(status_wb), __FILE__, __LINE__);
