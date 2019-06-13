@@ -87,8 +87,8 @@ __device__ void compute_matrix( const int rotation_angle,
 __global__ void rotate(float* in, cudaTextureObject_t mask, int iter, float precision, int* start, int* stop){
 	
 	const int index = blockIdx.x;
-	const int curr_start = start[iter];
-	const int curr_stop = stop[iter];
+	const int curr_start = start[iter];//tex1Dfetch<int>(start, iter);
+	const int curr_stop = stop[iter];//tex1Dfetch<int>(stop, iter);
 	const int x = threadIdx.x;
 	const int y = threadIdx.x + N_ATOMS;
 	const int z = threadIdx.x + 2*N_ATOMS;
@@ -200,7 +200,6 @@ __global__ void fragment_is_bumping(float* in, cudaTextureObject_t mask, int* is
 		if(!ix) is_bumping[index] = (reduced)? 1:0;
 	}
 }
-
 //this functions finds the index, the shotgun and the bumping of the best angle in a warp
 __inline__ __device__ void warpReduce(int ind, int sho, int bum, int &ret1, int &ret2, int &ret3) {
 	int im, sm, bm;
@@ -261,7 +260,6 @@ __inline__ __device__ int find_best(int* shotgun, int* bumping, int index){
 	return ind;
 }
 
-//this function finds the best angle and copies the best in[] array in the first position
 __global__ void eval_angles(float* in, int* shotgun, int* bumping){
 	
 	__shared__ int best_angle;
@@ -271,7 +269,7 @@ __global__ void eval_angles(float* in, int* shotgun, int* bumping){
 	int best_index = find_best(shotgun, bumping, index);
 
 	//this is done in order to broadcast to every thread what is the best value (otherwise, only the first warp knows it)
-	if(!index) best_angle = best_index;
+	if(index == 0) best_angle = best_index;
 	
 	__syncthreads();
 
@@ -352,7 +350,6 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	resDesc1.res.linear.desc.f = cudaChannelFormatKindFloat;
 	resDesc1.res.linear.desc.x = 32;
 	resDesc1.res.linear.sizeInBytes = VOLUMESIZE*sizeof(float);
-
 	cudaResourceDesc resDesc2;
 	memset(&resDesc2, 0, sizeof(resDesc2));
 	resDesc2.resType = cudaResourceTypeLinear;
@@ -360,15 +357,12 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	resDesc2.res.linear.desc.f = cudaChannelFormatKindFloat;
 	resDesc2.res.linear.desc.x = 32;
 	resDesc2.res.linear.sizeInBytes = MASKSIZE*sizeof(int);
-
 	cudaTextureDesc texDesc1;
 	memset(&texDesc1, 0.0, sizeof(texDesc1));
 	texDesc1.readMode = cudaReadModeElementType;
-
 	cudaTextureDesc texDesc2;
 	memset(&texDesc2, 0, sizeof(texDesc2));
 	texDesc2.readMode = cudaReadModeElementType;
-
 	cudaTextureObject_t texScore_pos=0;
 	cudaTextureObject_t texMask=0;
 	cudaCreateTextureObject(&texScore_pos, &resDesc1, &texDesc1, NULL);
