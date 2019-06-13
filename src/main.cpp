@@ -192,13 +192,13 @@ int main(int argc, char **argv)
 //check func
 	ps_check<64,4>(arraycheck,array2check,1,volumeData,start,stop,mask );
 
-	for (int k=0; k<3; k++)
-{
-	for (int i =0; i<64; i++){
-		std::cout<<array2[k*64+i]<<"\t"<<array2check[k*64+i] <<std::endl;
-	}
-	std::cout<<std::endl;
-}
+
+	for (int i =0; i<64; i++)
+		printf("%d:\t %.4f %.4f \t| %d: \t%.4f %.4f \t| %d: \t%.4f %.4f \n",i,array2[i],array2check[i],i+64,array2[1*64+i],array2check[1*64+i],i+128,array2[2*64+i],array2check[2*64+i]);
+		//std::cout<<array2[i]<<"\t"<<array2check[i] <<" |\t"<<array2[1*64+i]<<"\t"<<array2check[1*64+i] <<" |\t"<<array2[2*64+i]<<"\t"<<array2check[2*64+i]<<std::endl;
+
+		std::cout<<std::endl;
+
 	delete[] array;
 	delete[] arraycheck;
 	delete[] array2;
