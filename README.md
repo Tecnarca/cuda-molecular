@@ -1,5 +1,5 @@
-# cuda-molecular
-An algorithm that computes molecular transformations in CUDA.
+# Cuda Molecular
+GPU implementation, with CUDA C, of an algorithm to compute the optimal shape for a molecule composed of a certain number of fragments and atoms. See:
 - [Code](https://github.com/Tecnarca/cuda-molecular/tree/master/src)
 - [Project presentation](https://github.com/Tecnarca/cuda-molecular/blob/master/acapresentation.pdf)
 ---
