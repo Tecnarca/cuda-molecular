@@ -287,7 +287,8 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	cudaStream_t s1, s2;
 	cudaEvent_t start_t, stop_t;
 
-	//Malloc and memcpy. We were not requested to optimize the preparation of the memory to run the algorithm.
+	//Malloc and memcpy. We were NOT requested to optimize the preparation of the memory to run the algorithm.
+	//We could for example use streams to speed up the allocation process.
 	/*the in array dimension in the GPU is INSIZE*ceil(MAX_ANGLE/precision) 
 	because we need to store MAX_ANGLE/precision in[] array to rotate and evaluate them all at the same time*/
 	status = cudaMalloc((void**) &d_in, sizeof(float)*INSIZE*ceil(MAX_ANGLE/precision));
