@@ -1,3 +1,7 @@
+/* DISCLAIMER:
+This file contains only inizialitation code for the algorithm and checks the output of the
+cuda algorithm (in cuda_kerns.cu) against the output of the sequential algorithm (includes/check_kerns.cpp).
+*/
 
 // System includes
 #include <stdio.h>
