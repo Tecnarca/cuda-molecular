@@ -122,21 +122,6 @@ int main(int argc, char **argv)
 		arraycheck[i+128] =15*1.0;// i%64;
 	}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 	for (int i =0; i<ARRSIZE; i++)
 	{
 		array2[i] =0;//64-i;
@@ -168,20 +153,6 @@ int main(int argc, char **argv)
 		}
 	}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /*call function: angles to evaluate to 1°(on 256 total degrees).
  *
  * the function will have to evaluate data structures of 64 "atoms", that are the array (input data) and array2 (output data). 1 is the angle, volumeData is the value of the space for scoring, the start/stop arrays contains the position of the "atoms" used to initialize the rotation, and mask contains a bitmask that shows if an "atom" has to be rotated (1) or not (0). It also contains a 10 value that is the "start" atom.
@@ -189,13 +160,8 @@ int main(int argc, char **argv)
  */
 	ps_kern(array,array2,1,volumeData,start,stop,mask );
 
-
-
-
-
 //check func
 	ps_check<64,4>(arraycheck,array2check,1,volumeData,start,stop,mask );
-
 
 	for (int i =0; i<64; i++)
 		printf("%d:\t %.4f %.4f \t| %d: \t%.4f %.4f \t| %d: \t%.4f %.4f \n",i,array2[i],array2check[i],i+64,array2[1*64+i],array2check[1*64+i],i+128,array2[2*64+i],array2check[2*64+i]);
