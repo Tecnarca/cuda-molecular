@@ -8,7 +8,7 @@
 #define MAX_ANGLE 256 //up to which angle we need to run the algorithm?
 #define LIMIT_DISTANCE2 2.0 //used in fragment_is_bumping, it is the minimum distance between two atoms
 #define GRID_FACTOR_D 0.5
-#define POCKET_SIZE 100
+#define POCKET_SIZE 100 //linear dimension of the pocket (cube POCKET_SIZExPOCKET_SIZExPOCKET_SIZE)
 #define PI 3.141592653589793238462643383279
 #define RADIAN_COEF PI/128.0;
 #endif
