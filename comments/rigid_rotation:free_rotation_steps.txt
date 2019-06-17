@@ -1,5 +1,0 @@
-/check_kerns.h
-
-rigid_rotation is a SISD function rotating the molecule as rigid 
-
-free_rotation is a SISD function rotating the molecule on all of its liberty degrees
