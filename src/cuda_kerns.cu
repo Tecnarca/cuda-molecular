@@ -8,6 +8,7 @@
 #define MAX_ANGLE 256 //up to which angle we need to run the algorithm?
 #define LIMIT_DISTANCE2 2.0 //used in fragment_is_bumping, it is the minimum distance between two atoms
 #define GRID_FACTOR_D 0.5
+#define POCKET_SIZE 100
 #define PI 3.141592653589793238462643383279
 #define RADIAN_COEF PI/128.0;
 #endif
@@ -15,7 +16,7 @@
 #include <stdio.h>
 
 //Mask and the scores array are constant, so we treat them as texture objects
-texture<float, 1, cudaReadModeElementType> texScore_pos;
+static cudaTextureObject_t texScore_pos;
 texture<int, 1, cudaReadModeElementType> texMask;
 
 //This function returns the sum (reduction) of the 'val' variables in threads of the same warp
@@ -137,15 +138,8 @@ __global__ void measure_shotgun (float* in, cudaTextureObject_t scores, int* sho
 	int index_y = (int) (in[y]*GRID_FACTOR_D);
 	int index_z = (int) (in[z]*GRID_FACTOR_D);
 
-	if (index_x < 0) index_x = 0;
-	if (index_x > 100) index_x = 100;
-	if (index_y < 0) index_y = 0;
-	if (index_y > 100) index_y = 100;
-	if (index_z < 0) index_z = 0;
-	if (index_z > 100) index_z = 100;
-
 	//find the score from the texture
-	int score = (int) tex1Dfetch<float>(scores, index_x+100*index_y+10000*index_z);
+	int score = (int) tex3D<float>(scores, index_x, index_y, index_z);
 
 	//sum up all the scores and store them in the shotgun array
 	int reduced = blockReduce(score);
@@ -343,13 +337,28 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 		printf("%s in %s at line %d\n", cudaGetErrorString(status_cp), __FILE__, __LINE__);
 
 	//initializes bindless texture objects for mask and score_pos
-	cudaResourceDesc resDesc1;
-	memset(&resDesc1, 0.0, sizeof(resDesc1));
-	resDesc1.resType = cudaResourceTypeLinear;
-	resDesc1.res.linear.devPtr = d_score_pos;
-	resDesc1.res.linear.desc.f = cudaChannelFormatKindFloat;
-	resDesc1.res.linear.desc.x = 32;
-	resDesc1.res.linear.sizeInBytes = VOLUMESIZE*sizeof(float);
+	cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>();
+	cudaArray *d_cuArr;
+	cudaMalloc3DArray(&d_cuArr, &channelDesc, make_cudaExtent(POCKET_SIZE*sizeof(float),POCKET_SIZE,POCKET_SIZE), 0);
+	cudaMemcpy3DParms copyParams = {0};
+	copyParams.srcPtr = make_cudaPitchedPtr(d_score_pos, POCKET_SIZE*sizeof(float), POCKET_SIZE, POCKET_SIZE);
+	copyParams.dstArray = d_cuArr;
+	copyParams.extent = make_cudaExtent(POCKET_SIZE,POCKET_SIZE,POCKET_SIZE);
+	copyParams.kind = cudaMemcpyDeviceToDevice;
+	cudaMemcpy3D(&copyParams);
+	cudaResourceDesc texRes;
+	memset(&texRes, 0, sizeof(cudaResourceDesc));
+	texRes.resType = cudaResourceTypeArray;
+	texRes.res.array.array  = d_cuArr;
+	cudaTextureDesc texDescr;
+	memset(&texDescr, 0, sizeof(cudaTextureDesc));
+	texDescr.normalizedCoords = false;
+	texDescr.addressMode[0] = cudaAddressModeClamp;
+	texDescr.addressMode[1] = cudaAddressModeClamp;
+	texDescr.addressMode[2] = cudaAddressModeClamp;
+	texDescr.readMode = cudaReadModeElementType;
+	cudaCreateTextureObject(&texScore_pos, &texRes, &texDescr, NULL);
+
 	cudaResourceDesc resDesc2;
 	memset(&resDesc2, 0, sizeof(resDesc2));
 	resDesc2.resType = cudaResourceTypeLinear;
@@ -357,15 +366,10 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	resDesc2.res.linear.desc.f = cudaChannelFormatKindFloat;
 	resDesc2.res.linear.desc.x = 32;
 	resDesc2.res.linear.sizeInBytes = MASKSIZE*sizeof(int);
-	cudaTextureDesc texDesc1;
-	memset(&texDesc1, 0.0, sizeof(texDesc1));
-	texDesc1.readMode = cudaReadModeElementType;
 	cudaTextureDesc texDesc2;
 	memset(&texDesc2, 0, sizeof(texDesc2));
 	texDesc2.readMode = cudaReadModeElementType;
-	cudaTextureObject_t texScore_pos=0;
 	cudaTextureObject_t texMask=0;
-	cudaCreateTextureObject(&texScore_pos, &resDesc1, &texDesc1, NULL);
 	cudaCreateTextureObject(&texMask, &resDesc2, &texDesc2, NULL);
 
 	cudaEventCreate(&start_t);
