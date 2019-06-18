@@ -5,7 +5,7 @@
 #define N_FRAGS 4 //number of fragments
 #define MASKSIZE 256 //dimension of the 'mask'
 #define VOLUMESIZE 1000000 //dimension of 'score_pos'
-#define MAX_ANGLE 256 //up to which angle we need to run the algorithm?
+#define MAX_ANGLE 256 
 #define LIMIT_DISTANCE2 2.0 //used in fragment_is_bumping, it is the minimum distance between two atoms
 #define GRID_FACTOR_D 0.5
 #define POCKET_SIZE 100 //linear dimension of the pocket (cube POCKET_SIZExPOCKET_SIZExPOCKET_SIZE)
@@ -242,7 +242,6 @@ __inline__ __device__ int find_best(int* shotgun, int* bumping, int index){
 		bum = sharedB[lane];
 		shot = sharedS[lane];
 	} else {
-		//in case we use less than 1024 threads, we need to make sure that the first warp does not read good values
 		ind = 0;
 		bum = 1;
 		shot = 0;
@@ -267,7 +266,7 @@ __global__ void eval_angles(float* in, int* shotgun, int* bumping){
 	
 	__syncthreads();
 
-	//this line works assuming INSIZE<=MAX_ANGLE/precision. Copies back the best in[] in the first position.
+	//Copies back the best in[] in the first position.
 	if(index < INSIZE) in[index] = in[best_angle*INSIZE+index];
 }
 
@@ -281,10 +280,6 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	cudaStream_t s1, s2;
 	cudaEvent_t start_t, stop_t;
 
-	//Malloc and memcpy. We were NOT requested to optimize the preparation of the memory to run the algorithm.
-	//We could for example use streams to speed up the allocation process.
-	/*the in array dimension in the GPU is INSIZE*ceil(MAX_ANGLE/precision) 
-	because we need to store MAX_ANGLE/precision in[] array to rotate and evaluate them all at the same time*/
 	status = cudaMalloc((void**) &d_in, sizeof(float)*INSIZE*ceil(MAX_ANGLE/precision));
 	if(DEBUG && status!=cudaSuccess)
 		printf("%s in %s at line %d\n", cudaGetErrorString(status), __FILE__, __LINE__);
@@ -379,7 +374,7 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	cudaStreamCreate(&s1);
 	cudaStreamCreate(&s2);
 
-	//this are the blocks needed by the fragment_is_bumping() kernel
+	//these are the blocks needed by the fragment_is_bumping() kernel
 	dim3 bump_blocks(N_ATOMS,ceil(MAX_ANGLE/precision));
 
 	cudaEventRecord(start_t);
@@ -415,7 +410,7 @@ void ps_kern(float* in, float* out, float precision, float* score_pos, int* star
 	cudaEventElapsedTime(&milliseconds, start_t, stop_t);
 	printf("\nKernels executed in %f milliseconds\n", milliseconds);
 
-	//Write back the rotated in
+	//Write back the rotated in array
 	status_wb = cudaMemcpy(out, d_in, sizeof(float)*INSIZE, cudaMemcpyDeviceToHost);
 	if(DEBUG && status_wb!=cudaSuccess)
 		printf("%s in %s at line %d\n", cudaGetErrorString(status_wb), __FILE__, __LINE__);
